@@ -632,7 +632,7 @@ static int netns_add(int argc, char **argv)
 	 * file in all namespaces allowing the network namespace to be freed
 	 * sooner.
 	 */
-	while (mount("", NETNS_RUN_DIR, "none", MS_SHARED | MS_REC, NULL)) {
+	while (mount("", NETNS_RUN_DIR, "none", MS_SHARED, NULL)) {
 		/* Fail unless we need to make the mount point */
 		if (errno != EINVAL || made_netns_run_dir_mount) {
 			fprintf(stderr, "mount --make-shared %s failed: %s\n",
