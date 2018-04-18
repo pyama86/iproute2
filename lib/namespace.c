@@ -69,41 +69,6 @@ int netns_switch(char *name)
 	}
 	close(netns);
 
-	if (unshare(CLONE_NEWNS) < 0) {
-		fprintf(stderr, "unshare failed: %s\n", strerror(errno));
-		return -1;
-	}
-	/* Don't let any mounts propagate back to the parent */
-	if (mount("", "/", "none", MS_SLAVE | MS_REC, NULL)) {
-		fprintf(stderr, "\"mount --make-rslave /\" failed: %s\n",
-			strerror(errno));
-		return -1;
-	}
-
-	/* Mount a version of /sys that describes the network namespace */
-
-	if (statvfs("/sys", &fsstat) < 0) {
-		fprintf(stderr, "could not stat /sys (not mounted?): %s\n",strerror(errno));
-		return -1;
-	}
-	if (fsstat.f_flag & ST_RDONLY) {
-		/* If /sys is not writable (e.g. in a container), we can't
-		 * unmount the old /sys instance, but we can still mount a new
-		 * read-only instance over it. */
-		mountflags = MS_RDONLY;
-	} else {
-		if (umount2("/sys", MNT_DETACH) < 0) {
-			fprintf(stderr, "umount of /sys failed: %s\n", strerror(errno));
-			return -1;
-		}
-	}
-	if (mount(name, "/sys", "sysfs", mountflags, NULL) < 0) {
-		fprintf(stderr, "mount of /sys failed: %s\n",strerror(errno));
-		return -1;
-	}
-
-	/* Setup bind mounts for config files in /etc */
-	bind_etc(name);
 	return 0;
 }
 
