@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+#include "json_print.h"
 #include "libnetlink.h"
 #include "utils.h"
 #include "br_common.h"
@@ -26,15 +27,21 @@ static const char *port_states[] = {
 	[BR_STATE_BLOCKING] = "blocking",
 };
 
-static void print_link_flags(FILE *fp, unsigned int flags)
+static const char *hw_mode[] = {
+	"VEB", "VEPA"
+};
+
+static void print_link_flags(FILE *fp, unsigned int flags, unsigned int mdown)
 {
-	fprintf(fp, "<");
+	open_json_array(PRINT_ANY, is_json_context() ? "flags" : "<");
 	if (flags & IFF_UP && !(flags & IFF_RUNNING))
-		fprintf(fp, "NO-CARRIER%s", flags ? "," : "");
+		print_string(PRINT_ANY, NULL,
+			     flags ? "%s," : "%s", "NO-CARRIER");
 	flags &= ~IFF_RUNNING;
-#define _PF(f) if (flags&IFF_##f) { \
-		  flags &= ~IFF_##f ; \
-		  fprintf(fp, #f "%s", flags ? "," : ""); }
+
+#define _PF(f) if (flags&IFF_##f) {					\
+		flags &= ~IFF_##f ;					\
+		print_string(PRINT_ANY, NULL, flags ? "%s," : "%s", #f); }
 	_PF(LOOPBACK);
 	_PF(BROADCAST);
 	_PF(POINTOPOINT);
@@ -55,53 +62,145 @@ static void print_link_flags(FILE *fp, unsigned int flags)
 	_PF(ECHO);
 #undef _PF
 	if (flags)
-		fprintf(fp, "%x", flags);
-	fprintf(fp, "> ");
+		print_hex(PRINT_ANY, NULL, "%x", flags);
+	if (mdown)
+		print_string(PRINT_ANY, NULL, ",%s", "M-DOWN");
+	close_json_array(PRINT_ANY, "> ");
 }
 
-static const char *oper_states[] = {
-	"UNKNOWN", "NOTPRESENT", "DOWN", "LOWERLAYERDOWN",
-	"TESTING", "DORMANT",	 "UP"
-};
-
-static const char *hw_mode[] = {"VEB", "VEPA"};
-
-static void print_operstate(FILE *f, __u8 state)
-{
-	if (state >= ARRAY_SIZE(oper_states))
-		fprintf(f, "state %#x ", state);
-	else
-		fprintf(f, "state %s ", oper_states[state]);
-}
-
-static void print_portstate(FILE *f, __u8 state)
+static void print_portstate(__u8 state)
 {
 	if (state <= BR_STATE_BLOCKING)
-		fprintf(f, "state %s ", port_states[state]);
+		print_string(PRINT_ANY, "state",
+			     "state %s ", port_states[state]);
 	else
-		fprintf(f, "state (%d) ", state);
+		print_uint(PRINT_ANY, "state",
+			     "state (%d) ", state);
 }
 
-static void print_onoff(FILE *f, char *flag, __u8 val)
+static void print_onoff(FILE *fp, const char *flag, __u8 val)
 {
-	fprintf(f, "%s %s ", flag, val ? "on" : "off");
+	if (is_json_context())
+		print_bool(PRINT_JSON, flag, NULL, val);
+	else
+		fprintf(fp, "%s %s ", flag, val ? "on" : "off");
 }
 
-static void print_hwmode(FILE *f, __u16 mode)
+static void print_hwmode(__u16 mode)
 {
 	if (mode >= ARRAY_SIZE(hw_mode))
-		fprintf(f, "hwmode %#hx ", mode);
+		print_0xhex(PRINT_ANY, "hwmode",
+			    "hwmode %#llx ", mode);
 	else
-		fprintf(f, "hwmode %s ", hw_mode[mode]);
+		print_string(PRINT_ANY, "hwmode",
+			     "hwmode %s ", hw_mode[mode]);
 }
 
-int print_linkinfo(const struct sockaddr_nl *who,
-		   struct nlmsghdr *n, void *arg)
+static void print_protinfo(FILE *fp, struct rtattr *attr)
+{
+	if (attr->rta_type & NLA_F_NESTED) {
+		struct rtattr *prtb[IFLA_BRPORT_MAX + 1];
+
+		parse_rtattr_nested(prtb, IFLA_BRPORT_MAX, attr);
+
+		if (prtb[IFLA_BRPORT_STATE])
+			print_portstate(rta_getattr_u8(prtb[IFLA_BRPORT_STATE]));
+
+		if (prtb[IFLA_BRPORT_PRIORITY])
+			print_uint(PRINT_ANY, "priority",
+				   "priority %u ",
+				   rta_getattr_u16(prtb[IFLA_BRPORT_PRIORITY]));
+
+		if (prtb[IFLA_BRPORT_COST])
+			print_uint(PRINT_ANY, "cost",
+				   "cost %u ",
+				   rta_getattr_u32(prtb[IFLA_BRPORT_COST]));
+
+		if (!show_details)
+			return;
+
+		if (!is_json_context())
+			fprintf(fp, "%s    ", _SL_);
+
+		if (prtb[IFLA_BRPORT_MODE])
+			print_onoff(fp, "hairpin",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_MODE]));
+		if (prtb[IFLA_BRPORT_GUARD])
+			print_onoff(fp, "guard",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_GUARD]));
+		if (prtb[IFLA_BRPORT_PROTECT])
+			print_onoff(fp, "root_block",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_PROTECT]));
+		if (prtb[IFLA_BRPORT_FAST_LEAVE])
+			print_onoff(fp, "fastleave",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_FAST_LEAVE]));
+		if (prtb[IFLA_BRPORT_LEARNING])
+			print_onoff(fp, "learning",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_LEARNING]));
+		if (prtb[IFLA_BRPORT_LEARNING_SYNC])
+			print_onoff(fp, "learning_sync",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_LEARNING_SYNC]));
+		if (prtb[IFLA_BRPORT_UNICAST_FLOOD])
+			print_onoff(fp, "flood",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_UNICAST_FLOOD]));
+		if (prtb[IFLA_BRPORT_MCAST_FLOOD])
+			print_onoff(fp, "mcast_flood",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_MCAST_FLOOD]));
+		if (prtb[IFLA_BRPORT_MCAST_TO_UCAST])
+			print_onoff(fp, "mcast_to_unicast",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_MCAST_TO_UCAST]));
+		if (prtb[IFLA_BRPORT_NEIGH_SUPPRESS])
+			print_onoff(fp, "neigh_suppress",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_NEIGH_SUPPRESS]));
+		if (prtb[IFLA_BRPORT_VLAN_TUNNEL])
+			print_onoff(fp, "vlan_tunnel",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_VLAN_TUNNEL]));
+
+		if (prtb[IFLA_BRPORT_BACKUP_PORT]) {
+			int ifidx;
+
+			ifidx = rta_getattr_u32(prtb[IFLA_BRPORT_BACKUP_PORT]);
+			print_string(PRINT_ANY,
+				     "backup_port", "backup_port %s ",
+				     ll_index_to_name(ifidx));
+		}
+
+		if (prtb[IFLA_BRPORT_ISOLATED])
+			print_onoff(fp, "isolated",
+				    rta_getattr_u8(prtb[IFLA_BRPORT_ISOLATED]));
+	} else
+		print_portstate(rta_getattr_u8(attr));
+}
+
+
+/*
+ * This is reported by HW devices that have some bridging
+ * capabilities.
+ */
+static void print_af_spec(struct rtattr *attr, int ifindex)
+{
+	struct rtattr *aftb[IFLA_BRIDGE_MAX+1];
+
+	parse_rtattr_nested(aftb, IFLA_BRIDGE_MAX, attr);
+
+	if (aftb[IFLA_BRIDGE_MODE])
+		print_hwmode(rta_getattr_u16(aftb[IFLA_BRIDGE_MODE]));
+
+	if (!show_details)
+		return;
+
+	if (aftb[IFLA_BRIDGE_VLAN_INFO])
+		print_vlan_info(aftb[IFLA_BRIDGE_VLAN_INFO], ifindex);
+}
+
+int print_linkinfo(struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = arg;
-	int len = n->nlmsg_len;
 	struct ifinfomsg *ifi = NLMSG_DATA(n);
 	struct rtattr *tb[IFLA_MAX+1];
+	unsigned int m_flag = 0;
+	int len = n->nlmsg_len;
+	const char *name;
 
 	len -= NLMSG_LENGTH(sizeof(*ifi));
 	if (len < 0) {
@@ -117,134 +216,62 @@ int print_linkinfo(const struct sockaddr_nl *who,
 
 	parse_rtattr_flags(tb, IFLA_MAX, IFLA_RTA(ifi), len, NLA_F_NESTED);
 
-	if (tb[IFLA_IFNAME] == NULL) {
-		fprintf(stderr, "BUG: nil ifname\n");
+	name = get_ifname_rta(ifi->ifi_index, tb[IFLA_IFNAME]);
+	if (!name)
 		return -1;
-	}
 
+	open_json_object(NULL);
 	if (n->nlmsg_type == RTM_DELLINK)
-		fprintf(fp, "Deleted ");
+		print_bool(PRINT_ANY, "deleted", "Deleted ", true);
 
-	fprintf(fp, "%d: %s ", ifi->ifi_index,
-		tb[IFLA_IFNAME] ? rta_getattr_str(tb[IFLA_IFNAME]) : "<nil>");
-
-	if (tb[IFLA_OPERSTATE])
-		print_operstate(fp, rta_getattr_u8(tb[IFLA_OPERSTATE]));
-
-	if (tb[IFLA_LINK]) {
-		int iflink = rta_getattr_u32(tb[IFLA_LINK]);
-
-		fprintf(fp, "@%s: ",
-			iflink ? ll_index_to_name(iflink) : "NONE");
-	} else
-		fprintf(fp, ": ");
-
-	print_link_flags(fp, ifi->ifi_flags);
+	print_int(PRINT_ANY, "ifindex", "%d: ", ifi->ifi_index);
+	m_flag = print_name_and_link("%s: ", name, tb);
+	print_link_flags(fp, ifi->ifi_flags, m_flag);
 
 	if (tb[IFLA_MTU])
-		fprintf(fp, "mtu %u ", rta_getattr_u32(tb[IFLA_MTU]));
+		print_int(PRINT_ANY,
+			  "mtu", "mtu %u ",
+			  rta_getattr_u32(tb[IFLA_MTU]));
 
 	if (tb[IFLA_MASTER]) {
 		int master = rta_getattr_u32(tb[IFLA_MASTER]);
 
-		fprintf(fp, "master %s ", ll_index_to_name(master));
+		print_string(PRINT_ANY, "master", "master %s ",
+			     ll_index_to_name(master));
 	}
 
-	if (tb[IFLA_PROTINFO]) {
-		if (tb[IFLA_PROTINFO]->rta_type & NLA_F_NESTED) {
-			struct rtattr *prtb[IFLA_BRPORT_MAX+1];
+	if (tb[IFLA_PROTINFO])
+		print_protinfo(fp, tb[IFLA_PROTINFO]);
 
-			parse_rtattr_nested(prtb, IFLA_BRPORT_MAX,
-					    tb[IFLA_PROTINFO]);
+	if (tb[IFLA_AF_SPEC])
+		print_af_spec(tb[IFLA_AF_SPEC], ifi->ifi_index);
 
-			if (prtb[IFLA_BRPORT_STATE])
-				print_portstate(fp,
-						rta_getattr_u8(prtb[IFLA_BRPORT_STATE]));
-			if (prtb[IFLA_BRPORT_PRIORITY])
-				fprintf(fp, "priority %hu ",
-					rta_getattr_u16(prtb[IFLA_BRPORT_PRIORITY]));
-			if (prtb[IFLA_BRPORT_COST])
-				fprintf(fp, "cost %u ",
-					rta_getattr_u32(prtb[IFLA_BRPORT_COST]));
-
-			if (show_details) {
-				fprintf(fp, "%s    ", _SL_);
-
-				if (prtb[IFLA_BRPORT_MODE])
-					print_onoff(fp, "hairpin",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_MODE]));
-				if (prtb[IFLA_BRPORT_GUARD])
-					print_onoff(fp, "guard",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_GUARD]));
-				if (prtb[IFLA_BRPORT_PROTECT])
-					print_onoff(fp, "root_block",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_PROTECT]));
-				if (prtb[IFLA_BRPORT_FAST_LEAVE])
-					print_onoff(fp, "fastleave",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_FAST_LEAVE]));
-				if (prtb[IFLA_BRPORT_LEARNING])
-					print_onoff(fp, "learning",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_LEARNING]));
-				if (prtb[IFLA_BRPORT_LEARNING_SYNC])
-					print_onoff(fp, "learning_sync",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_LEARNING_SYNC]));
-				if (prtb[IFLA_BRPORT_UNICAST_FLOOD])
-					print_onoff(fp, "flood",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_UNICAST_FLOOD]));
-				if (prtb[IFLA_BRPORT_MCAST_FLOOD])
-					print_onoff(fp, "mcast_flood",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_MCAST_FLOOD]));
-				if (prtb[IFLA_BRPORT_NEIGH_SUPPRESS])
-					print_onoff(fp, "neigh_suppress",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_NEIGH_SUPPRESS]));
-				if (prtb[IFLA_BRPORT_VLAN_TUNNEL])
-					print_onoff(fp, "vlan_tunnel",
-						    rta_getattr_u8(prtb[IFLA_BRPORT_VLAN_TUNNEL]));
-			}
-		} else
-			print_portstate(fp, rta_getattr_u8(tb[IFLA_PROTINFO]));
-	}
-
-	if (tb[IFLA_AF_SPEC]) {
-		/* This is reported by HW devices that have some bridging
-		 * capabilities.
-		 */
-		struct rtattr *aftb[IFLA_BRIDGE_MAX+1];
-
-		parse_rtattr_nested(aftb, IFLA_BRIDGE_MAX, tb[IFLA_AF_SPEC]);
-
-		if (aftb[IFLA_BRIDGE_MODE])
-			print_hwmode(fp, rta_getattr_u16(aftb[IFLA_BRIDGE_MODE]));
-		if (show_details) {
-			if (aftb[IFLA_BRIDGE_VLAN_INFO]) {
-				fprintf(fp, "\n");
-				print_vlan_info(fp, tb[IFLA_AF_SPEC],
-						ifi->ifi_index);
-			}
-		}
-	}
-
-	fprintf(fp, "\n");
+	print_string(PRINT_FP, NULL, "%s", "\n");
+	close_json_object();
 	fflush(fp);
 	return 0;
 }
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: bridge link set dev DEV [ cost COST ] [ priority PRIO ] [ state STATE ]\n");
-	fprintf(stderr, "                               [ guard {on | off} ]\n");
-	fprintf(stderr, "                               [ hairpin {on | off} ]\n");
-	fprintf(stderr, "                               [ fastleave {on | off} ]\n");
-	fprintf(stderr,	"                               [ root_block {on | off} ]\n");
-	fprintf(stderr,	"                               [ learning {on | off} ]\n");
-	fprintf(stderr,	"                               [ learning_sync {on | off} ]\n");
-	fprintf(stderr,	"                               [ flood {on | off} ]\n");
-	fprintf(stderr,	"                               [ mcast_flood {on | off} ]\n");
-	fprintf(stderr,	"                               [ neigh_suppress {on | off} ]\n");
-	fprintf(stderr,	"                               [ vlan_tunnel {on | off} ]\n");
-	fprintf(stderr, "                               [ hwmode {vepa | veb} ]\n");
-	fprintf(stderr, "                               [ self ] [ master ]\n");
-	fprintf(stderr, "       bridge link show [dev DEV]\n");
+	fprintf(stderr,
+		"Usage: bridge link set dev DEV [ cost COST ] [ priority PRIO ] [ state STATE ]\n"
+		"                               [ guard {on | off} ]\n"
+		"                               [ hairpin {on | off} ]\n"
+		"                               [ fastleave {on | off} ]\n"
+		"                               [ root_block {on | off} ]\n"
+		"                               [ learning {on | off} ]\n"
+		"                               [ learning_sync {on | off} ]\n"
+		"                               [ flood {on | off} ]\n"
+		"                               [ mcast_flood {on | off} ]\n"
+		"                               [ mcast_to_unicast {on | off} ]\n"
+		"                               [ neigh_suppress {on | off} ]\n"
+		"                               [ vlan_tunnel {on | off} ]\n"
+		"                               [ isolated {on | off} ]\n"
+		"                               [ hwmode {vepa | veb} ]\n"
+		"                               [ backup_port DEVICE ] [ nobackup_port ]\n"
+		"                               [ self ] [ master ]\n"
+		"       bridge link show [dev DEV]\n");
 	exit(-1);
 }
 
@@ -277,12 +304,15 @@ static int brlink_modify(int argc, char **argv)
 		.ifm.ifi_family = PF_BRIDGE,
 	};
 	char *d = NULL;
+	int backup_port_idx = -1;
 	__s8 neigh_suppress = -1;
 	__s8 learning = -1;
 	__s8 learning_sync = -1;
 	__s8 flood = -1;
 	__s8 vlan_tunnel = -1;
 	__s8 mcast_flood = -1;
+	__s8 mcast_to_unicast = -1;
+	__s8 isolated = -1;
 	__s8 hairpin = -1;
 	__s8 bpdu_guard = -1;
 	__s8 fast_leave = -1;
@@ -304,7 +334,7 @@ static int brlink_modify(int argc, char **argv)
 				return -1;
 		} else if (strcmp(*argv, "hairpin") == 0) {
 			NEXT_ARG();
-			if (!on_off("hairping", &hairpin, *argv))
+			if (!on_off("hairpin", &hairpin, *argv))
 				return -1;
 		} else if (strcmp(*argv, "fastleave") == 0) {
 			NEXT_ARG();
@@ -329,6 +359,10 @@ static int brlink_modify(int argc, char **argv)
 		} else if (strcmp(*argv, "mcast_flood") == 0) {
 			NEXT_ARG();
 			if (!on_off("mcast_flood", &mcast_flood, *argv))
+				return -1;
+		} else if (strcmp(*argv, "mcast_to_unicast") == 0) {
+			NEXT_ARG();
+			if (!on_off("mcast_to_unicast", &mcast_to_unicast, *argv))
 				return -1;
 		} else if (strcmp(*argv, "cost") == 0) {
 			NEXT_ARG();
@@ -378,6 +412,20 @@ static int brlink_modify(int argc, char **argv)
 			if (!on_off("vlan_tunnel", &vlan_tunnel,
 				    *argv))
 				return -1;
+		} else if (strcmp(*argv, "isolated") == 0) {
+			NEXT_ARG();
+			if (!on_off("isolated", &isolated, *argv))
+				return -1;
+		} else if (strcmp(*argv, "backup_port") == 0) {
+			NEXT_ARG();
+			backup_port_idx = ll_name_to_index(*argv);
+			if (!backup_port_idx) {
+				fprintf(stderr, "Error: device %s does not exist\n",
+					*argv);
+				return -1;
+			}
+		} else if (strcmp(*argv, "nobackup_port") == 0) {
+			backup_port_idx = 0;
 		} else {
 			usage();
 		}
@@ -415,6 +463,9 @@ static int brlink_modify(int argc, char **argv)
 	if (mcast_flood >= 0)
 		addattr8(&req.n, sizeof(req), IFLA_BRPORT_MCAST_FLOOD,
 			 mcast_flood);
+	if (mcast_to_unicast >= 0)
+		addattr8(&req.n, sizeof(req), IFLA_BRPORT_MCAST_TO_UCAST,
+			 mcast_to_unicast);
 	if (learning >= 0)
 		addattr8(&req.n, sizeof(req), IFLA_BRPORT_LEARNING, learning);
 	if (learning_sync >= 0)
@@ -436,6 +487,12 @@ static int brlink_modify(int argc, char **argv)
 	if (vlan_tunnel != -1)
 		addattr8(&req.n, sizeof(req), IFLA_BRPORT_VLAN_TUNNEL,
 			 vlan_tunnel);
+	if (isolated != -1)
+		addattr8(&req.n, sizeof(req), IFLA_BRPORT_ISOLATED, isolated);
+
+	if (backup_port_idx != -1)
+		addattr32(&req.n, sizeof(req), IFLA_BRPORT_BACKUP_PORT,
+			  backup_port_idx);
 
 	addattr_nest_end(&req.n, nest);
 
@@ -477,15 +534,13 @@ static int brlink_show(int argc, char **argv)
 	}
 
 	if (filter_dev) {
-		if ((filter_index = ll_name_to_index(filter_dev)) == 0) {
-			fprintf(stderr, "Cannot find device \"%s\"\n",
-				filter_dev);
-			return -1;
-		}
+		filter_index = ll_name_to_index(filter_dev);
+		if (!filter_index)
+			return nodev(filter_dev);
 	}
 
 	if (show_details) {
-		if (rtnl_wilddump_req_filter(&rth, PF_BRIDGE, RTM_GETLINK,
+		if (rtnl_linkdump_req_filter(&rth, PF_BRIDGE,
 					     (compress_vlans ?
 					      RTEXT_FILTER_BRVLAN_COMPRESSED :
 					      RTEXT_FILTER_BRVLAN)) < 0) {
@@ -493,16 +548,20 @@ static int brlink_show(int argc, char **argv)
 			exit(1);
 		}
 	} else {
-		if (rtnl_wilddump_request(&rth, PF_BRIDGE, RTM_GETLINK) < 0) {
+		if (rtnl_linkdump_req(&rth, PF_BRIDGE) < 0) {
 			perror("Cannon send dump request");
 			exit(1);
 		}
 	}
 
+	new_json_obj(json);
 	if (rtnl_dump_filter(&rth, print_linkinfo, stdout) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		exit(1);
 	}
+
+	delete_json_obj();
+	fflush(stdout);
 	return 0;
 }
 

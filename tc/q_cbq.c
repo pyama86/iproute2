@@ -25,19 +25,21 @@
 
 static void explain_class(void)
 {
-	fprintf(stderr, "Usage: ... cbq bandwidth BPS rate BPS maxburst PKTS [ avpkt BYTES ]\n");
-	fprintf(stderr, "               [ minburst PKTS ] [ bounded ] [ isolated ]\n");
-	fprintf(stderr, "               [ allot BYTES ] [ mpu BYTES ] [ weight RATE ]\n");
-	fprintf(stderr, "               [ prio NUMBER ] [ cell BYTES ] [ ewma LOG ]\n");
-	fprintf(stderr, "               [ estimator INTERVAL TIME_CONSTANT ]\n");
-	fprintf(stderr, "               [ split CLASSID ] [ defmap MASK/CHANGE ]\n");
-	fprintf(stderr, "               [ overhead BYTES ] [ linklayer TYPE ]\n");
+	fprintf(stderr,
+		"Usage: ... cbq	bandwidth BPS rate BPS maxburst PKTS [ avpkt BYTES ]\n"
+		"		[ minburst PKTS ] [ bounded ] [ isolated ]\n"
+		"		[ allot BYTES ] [ mpu BYTES ] [ weight RATE ]\n"
+		"		[ prio NUMBER ] [ cell BYTES ] [ ewma LOG ]\n"
+		"		[ estimator INTERVAL TIME_CONSTANT ]\n"
+		"		[ split CLASSID ] [ defmap MASK/CHANGE ]\n"
+		"		[ overhead BYTES ] [ linklayer TYPE ]\n");
 }
 
 static void explain(void)
 {
-	fprintf(stderr, "Usage: ... cbq bandwidth BPS avpkt BYTES [ mpu BYTES ]\n");
-	fprintf(stderr, "               [ cell BYTES ] [ ewma LOG ]\n");
+	fprintf(stderr,
+		"Usage: ... cbq bandwidth BPS avpkt BYTES [ mpu BYTES ]\n"
+		"               [ cell BYTES ] [ ewma LOG ]\n");
 }
 
 static void explain1(char *arg)
@@ -165,8 +167,7 @@ static int cbq_parse_opt(struct qdisc_util *qu, int argc, char **argv, struct nl
 	lss.change = TCF_CBQ_LSS_MAXIDLE|TCF_CBQ_LSS_EWMA|TCF_CBQ_LSS_AVPKT;
 	lss.avpkt = avpkt;
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
+	tail = addattr_nest(n, 1024, TCA_OPTIONS);
 	addattr_l(n, 1024, TCA_CBQ_RATE, &r, sizeof(r));
 	addattr_l(n, 1024, TCA_CBQ_LSSOPT, &lss, sizeof(lss));
 	addattr_l(n, 3024, TCA_CBQ_RTAB, rtab, 1024);
@@ -177,7 +178,7 @@ static int cbq_parse_opt(struct qdisc_util *qu, int argc, char **argv, struct nl
 			printf("%u ", rtab[i]);
 		printf("\n");
 	}
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 	return 0;
 }
 
@@ -419,8 +420,7 @@ static int cbq_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 		lss.change |= TCF_CBQ_LSS_EWMA;
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
+	tail = addattr_nest(n, 1024, TCA_OPTIONS);
 	if (lss.change) {
 		lss.change |= TCF_CBQ_LSS_FLAGS;
 		addattr_l(n, 1024, TCA_CBQ_LSSOPT, &lss, sizeof(lss));
@@ -440,7 +440,7 @@ static int cbq_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 			printf("\n");
 		}
 	}
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 	return 0;
 }
 

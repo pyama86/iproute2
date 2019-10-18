@@ -24,15 +24,16 @@
 #include "ip_common.h"
 
 static void usage(void) __attribute__((noreturn));
-int prefix_banner;
+static int prefix_banner;
 int listen_all_nsid;
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: ip monitor [ all | LISTofOBJECTS ] [ FILE ] [ label ] [all-nsid] [dev DEVICE]\n");
-	fprintf(stderr, "LISTofOBJECTS := link | address | route | mroute | prefix |\n");
-	fprintf(stderr, "                 neigh | netconf | rule | nsid\n");
-	fprintf(stderr, "FILE := file FILENAME\n");
+	fprintf(stderr,
+		"Usage: ip monitor [ all | LISTofOBJECTS ] [ FILE ] [ label ] [all-nsid] [dev DEVICE]\n"
+		"LISTofOBJECTS := link | address | route | mroute | prefix |\n"
+		"		 neigh | netconf | rule | nsid\n"
+		"FILE := file FILENAME\n");
 	exit(-1);
 }
 
@@ -52,13 +53,14 @@ static void print_headers(FILE *fp, char *label, struct rtnl_ctrl_data *ctrl)
 		fprintf(fp, "%s", label);
 }
 
-static int accept_msg(const struct sockaddr_nl *who,
-		      struct rtnl_ctrl_data *ctrl,
+static int accept_msg(struct rtnl_ctrl_data *ctrl,
 		      struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
 
-	if (n->nlmsg_type == RTM_NEWROUTE || n->nlmsg_type == RTM_DELROUTE) {
+	switch (n->nlmsg_type) {
+	case RTM_NEWROUTE:
+	case RTM_DELROUTE: {
 		struct rtmsg *r = NLMSG_DATA(n);
 		int len = n->nlmsg_len - NLMSG_LENGTH(sizeof(*r));
 
@@ -73,33 +75,43 @@ static int accept_msg(const struct sockaddr_nl *who,
 		if (r->rtm_family == RTNL_FAMILY_IPMR ||
 		    r->rtm_family == RTNL_FAMILY_IP6MR) {
 			print_headers(fp, "[MROUTE]", ctrl);
-			print_mroute(who, n, arg);
+			print_mroute(n, arg);
 			return 0;
 		} else {
 			print_headers(fp, "[ROUTE]", ctrl);
-			print_route(who, n, arg);
+			print_route(n, arg);
 			return 0;
 		}
 	}
 
-	if (n->nlmsg_type == RTM_NEWLINK || n->nlmsg_type == RTM_DELLINK) {
-		ll_remember_index(who, n, NULL);
+	case RTM_NEWNEXTHOP:
+	case RTM_DELNEXTHOP:
+		print_headers(fp, "[NEXTHOP]", ctrl);
+		print_nexthop(n, arg);
+		return 0;
+
+	case RTM_NEWLINK:
+	case RTM_DELLINK:
+		ll_remember_index(n, NULL);
 		print_headers(fp, "[LINK]", ctrl);
-		print_linkinfo(who, n, arg);
+		print_linkinfo(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWADDR || n->nlmsg_type == RTM_DELADDR) {
+
+	case RTM_NEWADDR:
+	case RTM_DELADDR:
 		print_headers(fp, "[ADDR]", ctrl);
-		print_addrinfo(who, n, arg);
+		print_addrinfo(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWADDRLABEL || n->nlmsg_type == RTM_DELADDRLABEL) {
+
+	case RTM_NEWADDRLABEL:
+	case RTM_DELADDRLABEL:
 		print_headers(fp, "[ADDRLABEL]", ctrl);
-		print_addrlabel(who, n, arg);
+		print_addrlabel(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWNEIGH || n->nlmsg_type == RTM_DELNEIGH ||
-	    n->nlmsg_type == RTM_GETNEIGH) {
+
+	case RTM_NEWNEIGH:
+	case RTM_DELNEIGH:
+	case RTM_GETNEIGH:
 		if (preferred_family) {
 			struct ndmsg *r = NLMSG_DATA(n);
 
@@ -108,36 +120,44 @@ static int accept_msg(const struct sockaddr_nl *who,
 		}
 
 		print_headers(fp, "[NEIGH]", ctrl);
-		print_neigh(who, n, arg);
+		print_neigh(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWPREFIX) {
+
+	case RTM_NEWPREFIX:
 		print_headers(fp, "[PREFIX]", ctrl);
-		print_prefix(who, n, arg);
+		print_prefix(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWRULE || n->nlmsg_type == RTM_DELRULE) {
+
+	case RTM_NEWRULE:
+	case RTM_DELRULE:
 		print_headers(fp, "[RULE]", ctrl);
-		print_rule(who, n, arg);
+		print_rule(n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWNETCONF) {
-		print_headers(fp, "[NETCONF]", ctrl);
-		print_netconf(who, ctrl, n, arg);
-		return 0;
-	}
-	if (n->nlmsg_type == NLMSG_TSTAMP) {
+
+	case NLMSG_TSTAMP:
 		print_nlmsg_timestamp(fp, n);
 		return 0;
-	}
-	if (n->nlmsg_type == RTM_NEWNSID || n->nlmsg_type == RTM_DELNSID) {
-		print_headers(fp, "[NSID]", ctrl);
-		print_nsid(who, n, arg);
+
+	case RTM_NEWNETCONF:
+	case RTM_DELNETCONF:
+		print_headers(fp, "[NETCONF]", ctrl);
+		print_netconf(ctrl, n, arg);
 		return 0;
-	}
-	if (n->nlmsg_type != NLMSG_ERROR && n->nlmsg_type != NLMSG_NOOP &&
-	    n->nlmsg_type != NLMSG_DONE) {
-		fprintf(fp, "Unknown message: type=0x%08x(%d) flags=0x%08x(%d)len=0x%08x(%d)\n",
+
+	case RTM_DELNSID:
+	case RTM_NEWNSID:
+		print_headers(fp, "[NSID]", ctrl);
+		print_nsid(n, arg);
+		return 0;
+
+	case NLMSG_ERROR:
+	case NLMSG_NOOP:
+	case NLMSG_DONE:
+		break;	/* ignore */
+
+	default:
+		fprintf(stderr,
+			"Unknown message: type=0x%08x(%d) flags=0x%08x(%d) len=0x%08x(%d)\n",
 			n->nlmsg_type, n->nlmsg_type,
 			n->nlmsg_flags, n->nlmsg_flags, n->nlmsg_len,
 			n->nlmsg_len);
@@ -147,6 +167,7 @@ static int accept_msg(const struct sockaddr_nl *who,
 
 int do_ipmonitor(int argc, char **argv)
 {
+	int lnexthop = 0, nh_set = 1;
 	char *file = NULL;
 	unsigned int groups = 0;
 	int llink = 0;
@@ -188,29 +209,41 @@ int do_ipmonitor(int argc, char **argv)
 		} else if (matches(*argv, "link") == 0) {
 			llink = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "address") == 0) {
 			laddr = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "route") == 0) {
 			lroute = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "mroute") == 0) {
 			lmroute = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "prefix") == 0) {
 			lprefix = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "neigh") == 0) {
 			lneigh = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "netconf") == 0) {
 			lnetconf = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "rule") == 0) {
 			lrule = 1;
 			groups = 0;
+			nh_set = 0;
 		} else if (matches(*argv, "nsid") == 0) {
 			lnsid = 1;
+			groups = 0;
+			nh_set = 0;
+		} else if (matches(*argv, "nexthop") == 0) {
+			lnexthop = 1;
 			groups = 0;
 		} else if (strcmp(*argv, "all") == 0) {
 			prefix_banner = 1;
@@ -283,6 +316,9 @@ int do_ipmonitor(int argc, char **argv)
 	if (lnsid) {
 		groups |= nl_mgrp(RTNLGRP_NSID);
 	}
+	if (nh_set)
+		lnexthop = 1;
+
 	if (file) {
 		FILE *fp;
 		int err;
@@ -299,6 +335,12 @@ int do_ipmonitor(int argc, char **argv)
 
 	if (rtnl_open(&rth, groups) < 0)
 		exit(1);
+
+	if (lnexthop && rtnl_add_nl_group(&rth, RTNLGRP_NEXTHOP) < 0) {
+		fprintf(stderr, "Failed to add nexthop group to list\n");
+		exit(1);
+	}
+
 	if (listen_all_nsid && rtnl_listen_all_nsid(&rth) < 0)
 		exit(1);
 

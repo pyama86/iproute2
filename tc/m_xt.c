@@ -264,8 +264,7 @@ static int parse_ipt(struct action_util *a, int *argc_p,
 		}
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
+	tail = addattr_nest(n, MAX_MSG, tca_id);
 	fprintf(stdout, "tablename: %s hook: %s\n ", tname, ipthooks[hook]);
 	fprintf(stdout, "\ttarget: ");
 
@@ -290,7 +289,7 @@ static int parse_ipt(struct action_util *a, int *argc_p,
 	addattr_l(n, MAX_MSG, TCA_IPT_INDEX, &index, 4);
 	if (m)
 		addattr_l(n, MAX_MSG, TCA_IPT_TARG, m->t, m->t->u.target_size);
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 
 	argv += optind;
 	*argc_p -= argc;
@@ -318,6 +317,7 @@ print_ipt(struct action_util *au, FILE *f, struct rtattr *arg)
 	struct xtables_target *m;
 	struct rtattr *tb[TCA_IPT_MAX + 1];
 	struct xt_entry_target *t = NULL;
+	__u32 hook;
 
 	if (arg == NULL)
 		return -1;
@@ -331,26 +331,24 @@ print_ipt(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_IPT_MAX, arg);
 
 	if (tb[TCA_IPT_TABLE] == NULL) {
-		fprintf(f, "[NULL ipt table name ] assuming mangle ");
+		fprintf(stderr, "Missing ipt table name, assuming mangle\n");
 	} else {
 		fprintf(f, "tablename: %s ",
 			rta_getattr_str(tb[TCA_IPT_TABLE]));
 	}
 
 	if (tb[TCA_IPT_HOOK] == NULL) {
-		fprintf(f, "[NULL ipt hook name ]\n ");
+		fprintf(stderr, "Missing ipt hook name\n ");
 		return -1;
-	} else {
-		__u32 hook;
-
-		hook = rta_getattr_u32(tb[TCA_IPT_HOOK]);
-		fprintf(f, " hook: %s\n", ipthooks[hook]);
 	}
 
 	if (tb[TCA_IPT_TARG] == NULL) {
-		fprintf(f, "\t[NULL ipt target parameters ]\n");
+		fprintf(stderr, "Missing ipt target parameters\n");
 		return -1;
 	}
+
+	hook = rta_getattr_u32(tb[TCA_IPT_HOOK]);
+	fprintf(f, " hook: %s\n", ipthooks[hook]);
 
 	t = RTA_DATA(tb[TCA_IPT_TARG]);
 	m = xtables_find_target(t->u.user.name, XTF_TRY_LOAD);

@@ -40,8 +40,9 @@ static int atm_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 
 static void explain(void)
 {
-	fprintf(stderr, "Usage: ... atm ( pvc ADDR | svc ADDR [ sap SAP ] ) [ qos QOS ] [ sndbuf BYTES ]\n");
-	fprintf(stderr, "  [ hdr HEX... ] [ excess ( CLASSID | clp ) ] [ clip ]\n");
+	fprintf(stderr,
+		"Usage: ... atm ( pvc ADDR | svc ADDR [ sap SAP ] ) [ qos QOS ] [ sndbuf BYTES ]\n"
+		"  [ hdr HEX... ] [ excess ( CLASSID | clp ) ] [ clip ]\n");
 }
 
 
@@ -167,12 +168,13 @@ static int atm_parse_class_opt(struct qdisc_util *qu, int argc, char **argv,
 			perror("ioctl ATMARP_MKIP");
 			return -1;
 		}
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
+	tail = addattr_nest(n, 1024, TCA_OPTIONS);
 	addattr_l(n, 1024, TCA_ATM_FD, &s, sizeof(s));
-	if (excess) addattr_l(n, 1024, TCA_ATM_EXCESS, &excess, sizeof(excess));
-	if (hdr_len != -1) addattr_l(n, 1024, TCA_ATM_HDR, hdr, hdr_len);
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	if (excess)
+		addattr_l(n, 1024, TCA_ATM_EXCESS, &excess, sizeof(excess));
+	if (hdr_len != -1)
+		addattr_l(n, 1024, TCA_ATM_HDR, hdr, hdr_len);
+	addattr_nest_end(n, tail);
 	return 0;
 }
 

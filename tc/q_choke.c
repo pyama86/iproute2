@@ -26,8 +26,9 @@
 
 static void explain(void)
 {
-	fprintf(stderr, "Usage: ... choke limit PACKETS bandwidth KBPS [ecn]\n");
-	fprintf(stderr, "                 [ min PACKETS ] [ max PACKETS ] [ burst PACKETS ]\n");
+	fprintf(stderr,
+		"Usage: ... choke limit PACKETS bandwidth KBPS [ecn]\n"
+		"		 [ min PACKETS ] [ max PACKETS ] [ burst PACKETS ]\n");
 }
 
 static int choke_parse_opt(struct qdisc_util *qu, int argc, char **argv,
@@ -156,13 +157,12 @@ static int choke_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 	if (ecn_ok)
 		opt.flags |= TC_RED_ECN;
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
+	tail = addattr_nest(n, 1024, TCA_OPTIONS);
 	addattr_l(n, 1024, TCA_CHOKE_PARMS, &opt, sizeof(opt));
 	addattr_l(n, 1024, TCA_CHOKE_STAB, sbuf, 256);
 	max_P = probability * pow(2, 32);
 	addattr_l(n, 1024, TCA_CHOKE_MAX_P, &max_P, sizeof(max_P));
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 	return 0;
 }
 
@@ -189,8 +189,7 @@ static int choke_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 	fprintf(f, "limit %up min %up max %up ",
 		qopt->limit, qopt->qth_min, qopt->qth_max);
 
-	if (qopt->flags & TC_RED_ECN)
-		fprintf(f, "ecn ");
+	tc_red_print_flags(qopt->flags);
 
 	if (show_details) {
 		fprintf(f, "ewma %u ", qopt->Wlog);

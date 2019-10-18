@@ -24,9 +24,10 @@
 
 static void explain(void)
 {
-	fprintf(stderr, "Usage: ... tbf limit BYTES burst BYTES[/BYTES] rate KBPS [ mtu BYTES[/BYTES] ]\n");
-	fprintf(stderr, "               [ peakrate KBPS ] [ latency TIME ] ");
-	fprintf(stderr, "[ overhead BYTES ] [ linklayer TYPE ]\n");
+	fprintf(stderr,
+		"Usage: ... tbf limit BYTES burst BYTES[/BYTES] rate KBPS [ mtu BYTES[/BYTES] ]\n"
+		"	[ peakrate KBPS ] [ latency TIME ] "
+		"[ overhead BYTES ] [ linklayer TYPE ]\n");
 }
 
 static void explain1(const char *arg, const char *val)
@@ -241,8 +242,7 @@ static int tbf_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 		opt.mtu = tc_calc_xmittime(opt.peakrate.rate, mtu);
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
+	tail = addattr_nest(n, 1024, TCA_OPTIONS);
 	addattr_l(n, 2024, TCA_TBF_PARMS, &opt, sizeof(opt));
 	addattr_l(n, 2124, TCA_TBF_BURST, &buffer, sizeof(buffer));
 	if (rate64 >= (1ULL << 32))
@@ -254,7 +254,7 @@ static int tbf_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 		addattr_l(n, 3224, TCA_TBF_PBURST, &mtu, sizeof(mtu));
 		addattr_l(n, 4096, TCA_TBF_PTAB, ptab, 1024);
 	}
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 	return 0;
 }
 

@@ -142,8 +142,7 @@ static int parse_skbmod(struct action_util *a, int *argc_p, char ***argv_p,
 		skbmod_usage();
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
+	tail = addattr_nest(n, MAX_MSG, tca_id);
 	addattr_l(n, MAX_MSG, TCA_SKBMOD_PARMS, &p, sizeof(p));
 
 	if (daddr)
@@ -153,7 +152,7 @@ static int parse_skbmod(struct action_util *a, int *argc_p, char ***argv_p,
 	if (saddr)
 		addattr_l(n, MAX_MSG, TCA_SKBMOD_SMAC, sbuf, ETH_ALEN);
 
-	tail->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail;
+	addattr_nest_end(n, tail);
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -162,7 +161,7 @@ static int parse_skbmod(struct action_util *a, int *argc_p, char ***argv_p,
 
 static int print_skbmod(struct action_util *au, FILE *f, struct rtattr *arg)
 {
-	struct tc_skbmod *p = NULL;
+	struct tc_skbmod *p;
 	struct rtattr *tb[TCA_SKBMOD_MAX + 1];
 	__u16 skbmod_etype = 0;
 	int has_optional = 0;
@@ -175,7 +174,7 @@ static int print_skbmod(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_SKBMOD_MAX, arg);
 
 	if (tb[TCA_SKBMOD_PARMS] == NULL) {
-		fprintf(f, "[NULL skbmod parameters]");
+		fprintf(stderr, "Missing skbmod parameters\n");
 		return -1;
 	}
 

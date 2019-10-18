@@ -25,6 +25,10 @@
 #include "utils.h"
 #include "tc_util.h"
 
+static int act_parse_police(struct action_util *a, int *argc_p,
+			    char ***argv_p, int tca_id, struct nlmsghdr *n);
+static int print_police(struct action_util *a, FILE *f, struct rtattr *tb);
+
 struct action_util police_action_util = {
 	.id = "police",
 	.parse_aopt = act_parse_police,
@@ -33,15 +37,15 @@ struct action_util police_action_util = {
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: ... police rate BPS burst BYTES[/BYTES] [ mtu BYTES[/BYTES] ]\n");
-	fprintf(stderr, "                [ peakrate BPS ] [ avrate BPS ] [ overhead BYTES ]\n");
-	fprintf(stderr, "                [ linklayer TYPE ] [ CONTROL ]\n");
-
-	fprintf(stderr, "Where: CONTROL := conform-exceed <EXCEEDACT>[/NOTEXCEEDACT]\n");
-	fprintf(stderr, "                  Define how to handle packets which exceed (<EXCEEDACT>)\n");
-	fprintf(stderr, "                  or conform (<NOTEXCEEDACT>) the configured bandwidth limit.\n");
-	fprintf(stderr, "       EXCEEDACT/NOTEXCEEDACT := { pipe | ok | reclassify | drop | continue |\n");
-	fprintf(stderr, "                                   goto chain <CHAIN_INDEX> }\n");
+	fprintf(stderr,
+		"Usage: ... police rate BPS burst BYTES[/BYTES] [ mtu BYTES[/BYTES] ]\n"
+		"		[ peakrate BPS ] [ avrate BPS ] [ overhead BYTES ]\n"
+		"		[ linklayer TYPE ] [ CONTROL ]\n"
+		"Where: CONTROL := conform-exceed <EXCEEDACT>[/NOTEXCEEDACT]\n"
+		"		  Define how to handle packets which exceed (<EXCEEDACT>)\n"
+		"		  or conform (<NOTEXCEEDACT>) the configured bandwidth limit.\n"
+		"       EXCEEDACT/NOTEXCEEDACT := { pipe | ok | reclassify | drop | continue |\n"
+		"				   goto chain <CHAIN_INDEX> }\n");
 	exit(-1);
 }
 
@@ -50,8 +54,8 @@ static void explain1(char *arg)
 	fprintf(stderr, "Illegal \"%s\"\n", arg);
 }
 
-int act_parse_police(struct action_util *a, int *argc_p, char ***argv_p,
-		     int tca_id, struct nlmsghdr *n)
+static int act_parse_police(struct action_util *a, int *argc_p, char ***argv_p,
+			    int tca_id, struct nlmsghdr *n)
 {
 	int argc = *argc_p;
 	char **argv = *argv_p;
@@ -232,8 +236,7 @@ action_ctrl_ok:
 		}
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
+	tail = addattr_nest(n, MAX_MSG, tca_id);
 	addattr_l(n, MAX_MSG, TCA_POLICE_TBF, &p, sizeof(p));
 	if (p.rate.rate)
 		addattr_l(n, MAX_MSG, TCA_POLICE_RATE, rtab, 1024);
@@ -244,7 +247,7 @@ action_ctrl_ok:
 	if (presult)
 		addattr32(n, MAX_MSG, TCA_POLICE_RESULT, presult);
 
-	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+	addattr_nest_end(n, tail);
 	res = 0;
 
 	*argc_p = argc;
@@ -257,7 +260,7 @@ int parse_police(int *argc_p, char ***argv_p, int tca_id, struct nlmsghdr *n)
 	return act_parse_police(NULL, argc_p, argv_p, tca_id, n);
 }
 
-int print_police(struct action_util *a, FILE *f, struct rtattr *arg)
+static int print_police(struct action_util *a, FILE *f, struct rtattr *arg)
 {
 	SPRINT_BUF(b1);
 	SPRINT_BUF(b2);

@@ -43,14 +43,15 @@ static void usage(void);
 
 static void usage(void)
 {
-	fprintf(stderr, "Usage: tc class [ add | del | change | replace | show ] dev STRING\n");
-	fprintf(stderr, "       [ classid CLASSID ] [ root | parent CLASSID ]\n");
-	fprintf(stderr, "       [ [ QDISC_KIND ] [ help | OPTIONS ] ]\n");
-	fprintf(stderr, "\n");
-	fprintf(stderr, "       tc class show [ dev STRING ] [ root | parent CLASSID ]\n");
-	fprintf(stderr, "Where:\n");
-	fprintf(stderr, "QDISC_KIND := { prio | cbq | etc. }\n");
-	fprintf(stderr, "OPTIONS := ... try tc class add <desired QDISC_KIND> help\n");
+	fprintf(stderr,
+		"Usage: tc class [ add | del | change | replace | show ] dev STRING\n"
+		"       [ classid CLASSID ] [ root | parent CLASSID ]\n"
+		"       [ [ QDISC_KIND ] [ help | OPTIONS ] ]\n"
+		"\n"
+		"       tc class show [ dev STRING ] [ root | parent CLASSID ]\n"
+		"Where:\n"
+		"QDISC_KIND := { prio | cbq | etc. }\n"
+		"OPTIONS := ... try tc class add <desired QDISC_KIND> help\n");
 }
 
 static int tc_class_modify(int cmd, unsigned int flags, int argc, char **argv)
@@ -142,10 +143,9 @@ static int tc_class_modify(int cmd, unsigned int flags, int argc, char **argv)
 	if (d[0])  {
 		ll_init_map(&rth);
 
-		if ((req.t.tcm_ifindex = ll_name_to_index(d)) == 0) {
-			fprintf(stderr, "Cannot find device \"%s\"\n", d);
-			return 1;
-		}
+		req.t.tcm_ifindex = ll_name_to_index(d);
+		if (!req.t.tcm_ifindex)
+			return -nodev(d);
 	}
 
 	if (rtnl_talk(&rth, &req.n, NULL) < 0)
@@ -154,9 +154,9 @@ static int tc_class_modify(int cmd, unsigned int flags, int argc, char **argv)
 	return 0;
 }
 
-int filter_ifindex;
-__u32 filter_qdisc;
-__u32 filter_classid;
+static int filter_ifindex;
+static __u32 filter_qdisc;
+static __u32 filter_classid;
 
 static void graph_node_add(__u32 parent_id, __u32 id, void *data,
 		int len)
@@ -297,8 +297,7 @@ static void graph_cls_show(FILE *fp, char *buf, struct hlist_head *root_list,
 	}
 }
 
-int print_class(const struct sockaddr_nl *who,
-		       struct nlmsghdr *n, void *arg)
+int print_class(struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
 	struct tcmsg *t = NLMSG_DATA(n);
@@ -441,10 +440,9 @@ static int tc_class_list(int argc, char **argv)
 	ll_init_map(&rth);
 
 	if (d[0]) {
-		if ((t.tcm_ifindex = ll_name_to_index(d)) == 0) {
-			fprintf(stderr, "Cannot find device \"%s\"\n", d);
-			return 1;
-		}
+		t.tcm_ifindex = ll_name_to_index(d);
+		if (!t.tcm_ifindex)
+			return -nodev(d);
 		filter_ifindex = t.tcm_ifindex;
 	}
 

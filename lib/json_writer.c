@@ -75,7 +75,7 @@ static void jsonw_puts(json_writer_t *self, const char *str)
 			fputs("\\b", self->out);
 			break;
 		case '\\':
-			fputs("\\n", self->out);
+			fputs("\\\\", self->out);
 			break;
 		case '"':
 			fputs("\\\"", self->out);
@@ -152,6 +152,7 @@ void jsonw_name(json_writer_t *self, const char *name)
 		putc(' ', self->out);
 }
 
+__attribute__((format(printf, 2, 3)))
 void jsonw_printf(json_writer_t *self, const char *fmt, ...)
 {
 	va_list ap;
@@ -176,10 +177,15 @@ void jsonw_end_object(json_writer_t *self)
 void jsonw_start_array(json_writer_t *self)
 {
 	jsonw_begin(self, '[');
+	if (self->pretty)
+		putc(' ', self->out);
 }
 
 void jsonw_end_array(json_writer_t *self)
 {
+	if (self->pretty && self->sep)
+		putc(' ', self->out);
+	self->sep = '\0';
 	jsonw_end(self, ']');
 }
 
@@ -200,14 +206,14 @@ void jsonw_null(json_writer_t *self)
 	jsonw_printf(self, "null");
 }
 
-void jsonw_float_fmt(json_writer_t *self, const char *fmt, double num)
-{
-	jsonw_printf(self, fmt, num);
-}
-
 void jsonw_float(json_writer_t *self, double num)
 {
 	jsonw_printf(self, "%g", num);
+}
+
+void jsonw_hhu(json_writer_t *self, unsigned char num)
+{
+	jsonw_printf(self, "%hhu", num);
 }
 
 void jsonw_hu(json_writer_t *self, unsigned short num)
@@ -215,17 +221,37 @@ void jsonw_hu(json_writer_t *self, unsigned short num)
 	jsonw_printf(self, "%hu", num);
 }
 
-void jsonw_uint(json_writer_t *self, uint64_t num)
+void jsonw_uint(json_writer_t *self, unsigned int num)
+{
+	jsonw_printf(self, "%u", num);
+}
+
+void jsonw_u64(json_writer_t *self, uint64_t num)
 {
 	jsonw_printf(self, "%"PRIu64, num);
 }
 
-void jsonw_lluint(json_writer_t *self, unsigned long long int num)
+void jsonw_xint(json_writer_t *self, uint64_t num)
+{
+	jsonw_printf(self, "%"PRIx64, num);
+}
+
+void jsonw_luint(json_writer_t *self, unsigned long num)
+{
+	jsonw_printf(self, "%lu", num);
+}
+
+void jsonw_lluint(json_writer_t *self, unsigned long long num)
 {
 	jsonw_printf(self, "%llu", num);
 }
 
-void jsonw_int(json_writer_t *self, int64_t num)
+void jsonw_int(json_writer_t *self, int num)
+{
+	jsonw_printf(self, "%d", num);
+}
+
+void jsonw_s64(json_writer_t *self, int64_t num)
 {
 	jsonw_printf(self, "%"PRId64, num);
 }
@@ -249,19 +275,28 @@ void jsonw_float_field(json_writer_t *self, const char *prop, double val)
 	jsonw_float(self, val);
 }
 
-void jsonw_float_field_fmt(json_writer_t *self,
-			   const char *prop,
-			   const char *fmt,
-			   double val)
-{
-	jsonw_name(self, prop);
-	jsonw_float_fmt(self, fmt, val);
-}
-
-void jsonw_uint_field(json_writer_t *self, const char *prop, uint64_t num)
+void jsonw_uint_field(json_writer_t *self, const char *prop, unsigned int num)
 {
 	jsonw_name(self, prop);
 	jsonw_uint(self, num);
+}
+
+void jsonw_u64_field(json_writer_t *self, const char *prop, uint64_t num)
+{
+	jsonw_name(self, prop);
+	jsonw_u64(self, num);
+}
+
+void jsonw_xint_field(json_writer_t *self, const char *prop, uint64_t num)
+{
+	jsonw_name(self, prop);
+	jsonw_xint(self, num);
+}
+
+void jsonw_hhu_field(json_writer_t *self, const char *prop, unsigned char num)
+{
+	jsonw_name(self, prop);
+	jsonw_hhu(self, num);
 }
 
 void jsonw_hu_field(json_writer_t *self, const char *prop, unsigned short num)
@@ -270,18 +305,32 @@ void jsonw_hu_field(json_writer_t *self, const char *prop, unsigned short num)
 	jsonw_hu(self, num);
 }
 
+void jsonw_luint_field(json_writer_t *self,
+			const char *prop,
+			unsigned long num)
+{
+	jsonw_name(self, prop);
+	jsonw_luint(self, num);
+}
+
 void jsonw_lluint_field(json_writer_t *self,
 			const char *prop,
-			unsigned long long int num)
+			unsigned long long num)
 {
 	jsonw_name(self, prop);
 	jsonw_lluint(self, num);
 }
 
-void jsonw_int_field(json_writer_t *self, const char *prop, int64_t num)
+void jsonw_int_field(json_writer_t *self, const char *prop, int num)
 {
 	jsonw_name(self, prop);
 	jsonw_int(self, num);
+}
+
+void jsonw_s64_field(json_writer_t *self, const char *prop, int64_t num)
+{
+	jsonw_name(self, prop);
+	jsonw_s64(self, num);
 }
 
 void jsonw_null_field(json_writer_t *self, const char *prop)
