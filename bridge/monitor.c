@@ -27,7 +27,7 @@
 
 
 static void usage(void) __attribute__((noreturn));
-static int prefix_banner;
+int prefix_banner;
 
 static void usage(void)
 {
@@ -35,7 +35,8 @@ static void usage(void)
 	exit(-1);
 }
 
-static int accept_msg(struct rtnl_ctrl_data *ctrl,
+static int accept_msg(const struct sockaddr_nl *who,
+		      struct rtnl_ctrl_data *ctrl,
 		      struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = arg;
@@ -49,19 +50,19 @@ static int accept_msg(struct rtnl_ctrl_data *ctrl,
 		if (prefix_banner)
 			fprintf(fp, "[LINK]");
 
-		return print_linkinfo(n, arg);
+		return print_linkinfo(who, n, arg);
 
 	case RTM_NEWNEIGH:
 	case RTM_DELNEIGH:
 		if (prefix_banner)
 			fprintf(fp, "[NEIGH]");
-		return print_fdb(n, arg);
+		return print_fdb(who, n, arg);
 
 	case RTM_NEWMDB:
 	case RTM_DELMDB:
 		if (prefix_banner)
 			fprintf(fp, "[MDB]");
-		return print_mdb_mon(n, arg);
+		return print_mdb(who, n, arg);
 
 	case NLMSG_TSTAMP:
 		print_nlmsg_timestamp(fp, n);

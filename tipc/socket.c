@@ -84,7 +84,8 @@ static int sock_list_cb(const struct nlmsghdr *nlh, void *data)
 		mnl_attr_parse_nested(attrs[TIPC_NLA_SOCK_CON], parse_attrs, con);
 		node = mnl_attr_get_u32(con[TIPC_NLA_CON_NODE]);
 
-		printf("  connected to %x:%u", node,
+		printf("  connected to <%u.%u.%u:%u>", tipc_zone(node),
+			tipc_cluster(node), tipc_node(node),
 			mnl_attr_get_u32(con[TIPC_NLA_CON_SOCK]));
 
 		if (con[TIPC_NLA_CON_FLAG])

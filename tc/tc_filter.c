@@ -45,42 +45,45 @@ static void usage(void)
 		"OPTIONS := ... try tc filter add <desired FILTER_KIND> help\n");
 }
 
-static void chain_usage(void)
-{
-	fprintf(stderr,
-		"Usage: tc chain [ add | del | get | show ] [ dev STRING ]\n"
-		"       tc chain [ add | del | get | show ] [ block BLOCK_INDEX ] ]\n");
-}
-
 struct tc_filter_req {
 	struct nlmsghdr		n;
 	struct tcmsg		t;
 	char			buf[MAX_MSG];
 };
 
-static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv)
+static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv,
+			    void *buf, size_t buflen)
 {
-	struct {
-		struct nlmsghdr	n;
-		struct tcmsg		t;
-		char			buf[MAX_MSG];
-	} req = {
-		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg)),
-		.n.nlmsg_flags = NLM_F_REQUEST | flags,
-		.n.nlmsg_type = cmd,
-		.t.tcm_family = AF_UNSPEC,
-	};
+	struct tc_filter_req *req, filter_req;
 	struct filter_util *q = NULL;
-	__u32 prio = 0;
-	__u32 protocol = 0;
+	struct tc_estimator est = {};
+	char k[FILTER_NAMESZ] = {};
+	int chain_index_set = 0;
+	char d[IFNAMSIZ] = {};
 	int protocol_set = 0;
 	__u32 block_index = 0;
-	__u32 chain_index;
-	int chain_index_set = 0;
 	char *fhandle = NULL;
-	char  d[IFNAMSIZ] = {};
-	char  k[FILTER_NAMESZ] = {};
-	struct tc_estimator est = {};
+	__u32 protocol = 0;
+	__u32 chain_index;
+	struct iovec iov;
+	__u32 prio = 0;
+	int ret;
+
+	if (buf) {
+		req = buf;
+		if (buflen < sizeof (struct tc_filter_req)) {
+			fprintf(stderr, "buffer is too small: %zu\n", buflen);
+			return -1;
+		}
+	} else {
+		memset(&filter_req, 0, sizeof (struct tc_filter_req));
+		req = &filter_req;
+	}
+
+	req->n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg));
+	req->n.nlmsg_flags = NLM_F_REQUEST | flags;
+	req->n.nlmsg_type = cmd;
+	req->t.tcm_family = AF_UNSPEC;
 
 	if (cmd == RTM_NEWTFILTER && flags & NLM_F_CREATE)
 		protocol = htons(ETH_P_ALL);
@@ -91,7 +94,7 @@ static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv)
 			if (d[0])
 				duparg("dev", *argv);
 			if (block_index) {
-				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exclusive\n");
+				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exlusive\n");
 				return -1;
 			}
 			strncpy(d, *argv, sizeof(d)-1);
@@ -100,43 +103,43 @@ static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv)
 			if (block_index)
 				duparg("block", *argv);
 			if (d[0]) {
-				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exclusive\n");
+				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exlusive\n");
 				return -1;
 			}
 			if (get_u32(&block_index, *argv, 0) || !block_index)
 				invarg("invalid block index value", *argv);
 		} else if (strcmp(*argv, "root") == 0) {
-			if (req.t.tcm_parent) {
+			if (req->t.tcm_parent) {
 				fprintf(stderr,
 					"Error: \"root\" is duplicate parent ID\n");
 				return -1;
 			}
-			req.t.tcm_parent = TC_H_ROOT;
+			req->t.tcm_parent = TC_H_ROOT;
 		} else if (strcmp(*argv, "ingress") == 0) {
-			if (req.t.tcm_parent) {
+			if (req->t.tcm_parent) {
 				fprintf(stderr,
 					"Error: \"ingress\" is duplicate parent ID\n");
 				return -1;
 			}
-			req.t.tcm_parent = TC_H_MAKE(TC_H_CLSACT,
+			req->t.tcm_parent = TC_H_MAKE(TC_H_CLSACT,
 						     TC_H_MIN_INGRESS);
 		} else if (strcmp(*argv, "egress") == 0) {
-			if (req.t.tcm_parent) {
+			if (req->t.tcm_parent) {
 				fprintf(stderr,
 					"Error: \"egress\" is duplicate parent ID\n");
 				return -1;
 			}
-			req.t.tcm_parent = TC_H_MAKE(TC_H_CLSACT,
+			req->t.tcm_parent = TC_H_MAKE(TC_H_CLSACT,
 						     TC_H_MIN_EGRESS);
 		} else if (strcmp(*argv, "parent") == 0) {
 			__u32 handle;
 
 			NEXT_ARG();
-			if (req.t.tcm_parent)
+			if (req->t.tcm_parent)
 				duparg("parent", *argv);
 			if (get_tc_classid(&handle, *argv))
 				invarg("Invalid parent ID", *argv);
-			req.t.tcm_parent = handle;
+			req->t.tcm_parent = handle;
 		} else if (strcmp(*argv, "handle") == 0) {
 			NEXT_ARG();
 			if (fhandle)
@@ -183,29 +186,29 @@ static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv)
 		argc--; argv++;
 	}
 
-	req.t.tcm_info = TC_H_MAKE(prio<<16, protocol);
+	req->t.tcm_info = TC_H_MAKE(prio<<16, protocol);
 
 	if (chain_index_set)
-		addattr32(&req.n, sizeof(req), TCA_CHAIN, chain_index);
+		addattr32(&req->n, sizeof(*req), TCA_CHAIN, chain_index);
 
 	if (k[0])
-		addattr_l(&req.n, sizeof(req), TCA_KIND, k, strlen(k)+1);
+		addattr_l(&req->n, sizeof(*req), TCA_KIND, k, strlen(k)+1);
 
 	if (d[0])  {
 		ll_init_map(&rth);
 
-		req.t.tcm_ifindex = ll_name_to_index(d);
-		if (req.t.tcm_ifindex == 0) {
+		req->t.tcm_ifindex = ll_name_to_index(d);
+		if (req->t.tcm_ifindex == 0) {
 			fprintf(stderr, "Cannot find device \"%s\"\n", d);
 			return 1;
 		}
 	} else if (block_index) {
-		req.t.tcm_ifindex = TCM_IFINDEX_MAGIC_BLOCK;
-		req.t.tcm_block_index = block_index;
+		req->t.tcm_ifindex = TCM_IFINDEX_MAGIC_BLOCK;
+		req->t.tcm_block_index = block_index;
 	}
 
 	if (q) {
-		if (q->parse_fopt(q, fhandle, argc, argv, &req.n))
+		if (q->parse_fopt(q, fhandle, argc, argv, &req->n))
 			return 1;
 	} else {
 		if (fhandle) {
@@ -224,10 +227,16 @@ static int tc_filter_modify(int cmd, unsigned int flags, int argc, char **argv)
 	}
 
 	if (est.ewma_log)
-		addattr_l(&req.n, sizeof(req), TCA_RATE, &est, sizeof(est));
+		addattr_l(&req->n, sizeof(*req), TCA_RATE, &est, sizeof(est));
 
-	if (rtnl_talk(&rth, &req.n, NULL) < 0) {
-		fprintf(stderr, "We have an error talking to the kernel\n");
+	if (buf)
+		return 0;
+
+	iov.iov_base = &req->n;
+	iov.iov_len = req->n.nlmsg_len;
+	ret = rtnl_talk_iov(&rth, &iov, 1, NULL);
+	if (ret < 0) {
+		fprintf(stderr, "We have an error talking to the kernel, %d\n", ret);
 		return 2;
 	}
 
@@ -243,7 +252,7 @@ static int filter_chain_index_set;
 static __u32 filter_block_index;
 __u16 f_proto;
 
-int print_filter(struct nlmsghdr *n, void *arg)
+int print_filter(const struct sockaddr_nl *who, struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
 	struct tcmsg *t = NLMSG_DATA(n);
@@ -254,10 +263,7 @@ int print_filter(struct nlmsghdr *n, void *arg)
 
 	if (n->nlmsg_type != RTM_NEWTFILTER &&
 	    n->nlmsg_type != RTM_GETTFILTER &&
-	    n->nlmsg_type != RTM_DELTFILTER &&
-	    n->nlmsg_type != RTM_NEWCHAIN &&
-	    n->nlmsg_type != RTM_GETCHAIN &&
-	    n->nlmsg_type != RTM_DELCHAIN) {
+	    n->nlmsg_type != RTM_DELTFILTER) {
 		fprintf(stderr, "Not a filter(cmd %d)\n", n->nlmsg_type);
 		return 0;
 	}
@@ -269,36 +275,27 @@ int print_filter(struct nlmsghdr *n, void *arg)
 
 	parse_rtattr(tb, TCA_MAX, TCA_RTA(t), len);
 
-	if (tb[TCA_KIND] == NULL && (n->nlmsg_type == RTM_NEWTFILTER ||
-				     n->nlmsg_type == RTM_GETTFILTER ||
-				     n->nlmsg_type == RTM_DELTFILTER)) {
+	if (tb[TCA_KIND] == NULL) {
 		fprintf(stderr, "print_filter: NULL kind\n");
 		return -1;
 	}
 
 	open_json_object(NULL);
 
-	if (n->nlmsg_type == RTM_DELTFILTER || n->nlmsg_type == RTM_DELCHAIN)
+	if (n->nlmsg_type == RTM_DELTFILTER)
 		print_bool(PRINT_ANY, "deleted", "deleted ", true);
 
-	if ((n->nlmsg_type == RTM_NEWTFILTER ||
-	     n->nlmsg_type == RTM_NEWCHAIN) &&
+	if (n->nlmsg_type == RTM_NEWTFILTER &&
 			(n->nlmsg_flags & NLM_F_CREATE) &&
 			!(n->nlmsg_flags & NLM_F_EXCL))
 		print_bool(PRINT_ANY, "replaced", "replaced ", true);
 
-	if ((n->nlmsg_type == RTM_NEWTFILTER ||
-	     n->nlmsg_type == RTM_NEWCHAIN) &&
+	if (n->nlmsg_type == RTM_NEWTFILTER &&
 			(n->nlmsg_flags & NLM_F_CREATE) &&
 			(n->nlmsg_flags & NLM_F_EXCL))
 		print_bool(PRINT_ANY, "added", "added ", true);
 
-	if (n->nlmsg_type == RTM_NEWTFILTER ||
-	    n->nlmsg_type == RTM_GETTFILTER ||
-	    n->nlmsg_type == RTM_DELTFILTER)
-		print_string(PRINT_FP, NULL, "filter ", NULL);
-	else
-		print_string(PRINT_FP, NULL, "chain ", NULL);
+	print_string(PRINT_FP, NULL, "filter ", NULL);
 	if (t->tcm_ifindex == TCM_IFINDEX_MAGIC_BLOCK) {
 		if (!filter_block_index ||
 		    filter_block_index != t->tcm_block_index)
@@ -306,7 +303,8 @@ int print_filter(struct nlmsghdr *n, void *arg)
 				   t->tcm_block_index);
 	} else {
 		if (!filter_ifindex || filter_ifindex != t->tcm_ifindex)
-			print_devname(PRINT_ANY, t->tcm_ifindex);
+			print_string(PRINT_ANY, "dev", "dev %s ",
+				     ll_index_to_name(t->tcm_ifindex));
 
 		if (!filter_parent || filter_parent != t->tcm_parent) {
 			if (t->tcm_parent == TC_H_ROOT)
@@ -322,9 +320,7 @@ int print_filter(struct nlmsghdr *n, void *arg)
 		}
 	}
 
-	if (t->tcm_info && (n->nlmsg_type == RTM_NEWTFILTER ||
-			    n->nlmsg_type == RTM_DELTFILTER ||
-			    n->nlmsg_type == RTM_GETTFILTER)) {
+	if (t->tcm_info) {
 		f_proto = TC_H_MIN(t->tcm_info);
 		__u32 prio = TC_H_MAJ(t->tcm_info)>>16;
 
@@ -341,8 +337,7 @@ int print_filter(struct nlmsghdr *n, void *arg)
 				print_uint(PRINT_ANY, "pref", "pref %u ", prio);
 		}
 	}
-	if (tb[TCA_KIND])
-		print_string(PRINT_ANY, "kind", "%s ", rta_getattr_str(tb[TCA_KIND]));
+	print_string(PRINT_ANY, "kind", "%s ", rta_getattr_str(tb[TCA_KIND]));
 
 	if (tb[TCA_CHAIN]) {
 		__u32 chain_index = rta_getattr_u32(tb[TCA_CHAIN]);
@@ -353,16 +348,15 @@ int print_filter(struct nlmsghdr *n, void *arg)
 				   chain_index);
 	}
 
-	if (tb[TCA_KIND]) {
-		q = get_filter_kind(RTA_DATA(tb[TCA_KIND]));
-		if (tb[TCA_OPTIONS]) {
-			open_json_object("options");
-			if (q)
-				q->print_fopt(q, fp, tb[TCA_OPTIONS], t->tcm_handle);
-			else
-				fprintf(stderr, "cannot parse option parameters\n");
-			close_json_object();
-		}
+	q = get_filter_kind(RTA_DATA(tb[TCA_KIND]));
+	if (tb[TCA_OPTIONS]) {
+		open_json_object("options");
+		if (q)
+			q->print_fopt(q, fp, tb[TCA_OPTIONS], t->tcm_handle);
+		else
+			print_string(PRINT_FP, NULL,
+				     "[cannot parse parameters]", NULL);
+		close_json_object();
 	}
 	print_string(PRINT_FP, NULL, "\n", NULL);
 
@@ -414,7 +408,7 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 			if (d[0])
 				duparg("dev", *argv);
 			if (block_index) {
-				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exclusive\n");
+				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exlusive\n");
 				return -1;
 			}
 			strncpy(d, *argv, sizeof(d)-1);
@@ -423,7 +417,7 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 			if (block_index)
 				duparg("block", *argv);
 			if (d[0]) {
-				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exclusive\n");
+				fprintf(stderr, "Error: \"dev\" and \"block\" are mutually exlusive\n");
 				return -1;
 			}
 			if (get_u32(&block_index, *argv, 0) || !block_index)
@@ -505,19 +499,17 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 		argc--; argv++;
 	}
 
-	if (cmd == RTM_GETTFILTER) {
-		if (!protocol_set) {
-			fprintf(stderr, "Must specify filter protocol\n");
-			return -1;
-		}
-
-		if (!prio) {
-			fprintf(stderr, "Must specify filter priority\n");
-			return -1;
-		}
-
-		req.t.tcm_info = TC_H_MAKE(prio<<16, protocol);
+	if (!protocol_set) {
+		fprintf(stderr, "Must specify filter protocol\n");
+		return -1;
 	}
+
+	if (!prio) {
+		fprintf(stderr, "Must specify filter priority\n");
+		return -1;
+	}
+
+	req.t.tcm_info = TC_H_MAKE(prio<<16, protocol);
 
 	if (chain_index_set)
 		addattr32(&req.n, sizeof(req), TCA_CHAIN, chain_index);
@@ -527,21 +519,21 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 		return -1;
 	}
 
-	if (cmd == RTM_GETTFILTER) {
-		if (k[0])
-			addattr_l(&req.n, sizeof(req), TCA_KIND, k, strlen(k)+1);
-		else {
-			fprintf(stderr, "Must specify filter type\n");
-			return -1;
-		}
+	if (k[0])
+		addattr_l(&req.n, sizeof(req), TCA_KIND, k, strlen(k)+1);
+	else {
+		fprintf(stderr, "Must specify filter type\n");
+		return -1;
 	}
 
 	if (d[0])  {
 		ll_init_map(&rth);
 
 		req.t.tcm_ifindex = ll_name_to_index(d);
-		if (!req.t.tcm_ifindex)
-			return -nodev(d);
+		if (req.t.tcm_ifindex  == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", d);
+			return 1;
+		}
 		filter_ifindex = req.t.tcm_ifindex;
 	} else if (block_index) {
 		req.t.tcm_ifindex = TCM_IFINDEX_MAGIC_BLOCK;
@@ -552,11 +544,10 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 		return -1;
 	}
 
-	if (cmd == RTM_GETTFILTER &&
-	    q->parse_fopt(q, fhandle, argc, argv, &req.n))
+	if (q->parse_fopt(q, fhandle, argc, argv, &req.n))
 		return 1;
 
-	if (!fhandle && cmd == RTM_GETTFILTER) {
+	if (!fhandle) {
 		fprintf(stderr, "Must specify filter \"handle\"\n");
 		return -1;
 	}
@@ -576,14 +567,14 @@ static int tc_filter_get(int cmd, unsigned int flags, int argc, char **argv)
 	}
 
 	new_json_obj(json);
-	print_filter(answer, (void *)stdout);
+	print_filter(NULL, answer, (void *)stdout);
 	delete_json_obj();
 
 	free(answer);
 	return 0;
 }
 
-static int tc_filter_list(int cmd, int argc, char **argv)
+static int tc_filter_list(int argc, char **argv)
 {
 	struct {
 		struct nlmsghdr n;
@@ -591,7 +582,7 @@ static int tc_filter_list(int cmd, int argc, char **argv)
 		char buf[MAX_MSG];
 	} req = {
 		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct tcmsg)),
-		.n.nlmsg_type = cmd,
+		.n.nlmsg_type = RTM_GETTFILTER,
 		.t.tcm_parent = TC_H_UNSPEC,
 		.t.tcm_family = AF_UNSPEC,
 	};
@@ -705,8 +696,10 @@ static int tc_filter_list(int cmd, int argc, char **argv)
 
 	if (d[0]) {
 		req.t.tcm_ifindex = ll_name_to_index(d);
-		if (!req.t.tcm_ifindex)
-			return -nodev(d);
+		if (req.t.tcm_ifindex == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", d);
+			return 1;
+		}
 		filter_ifindex = req.t.tcm_ifindex;
 	} else if (block_index) {
 		if (!tc_qdisc_block_exists(block_index)) {
@@ -736,55 +729,32 @@ static int tc_filter_list(int cmd, int argc, char **argv)
 	return 0;
 }
 
-int do_filter(int argc, char **argv)
+int do_filter(int argc, char **argv, void *buf, size_t buflen)
 {
 	if (argc < 1)
-		return tc_filter_list(RTM_GETTFILTER, 0, NULL);
+		return tc_filter_list(0, NULL);
 	if (matches(*argv, "add") == 0)
 		return tc_filter_modify(RTM_NEWTFILTER, NLM_F_EXCL|NLM_F_CREATE,
-					argc-1, argv+1);
+					argc-1, argv+1, buf, buflen);
 	if (matches(*argv, "change") == 0)
-		return tc_filter_modify(RTM_NEWTFILTER, 0, argc-1, argv+1);
+		return tc_filter_modify(RTM_NEWTFILTER, 0, argc-1, argv+1,
+					buf, buflen);
 	if (matches(*argv, "replace") == 0)
 		return tc_filter_modify(RTM_NEWTFILTER, NLM_F_CREATE, argc-1,
-					argv+1);
+					argv+1, buf, buflen);
 	if (matches(*argv, "delete") == 0)
-		return tc_filter_modify(RTM_DELTFILTER, 0,  argc-1, argv+1);
+		return tc_filter_modify(RTM_DELTFILTER, 0, argc-1, argv+1,
+					buf, buflen);
 	if (matches(*argv, "get") == 0)
 		return tc_filter_get(RTM_GETTFILTER, 0,  argc-1, argv+1);
 	if (matches(*argv, "list") == 0 || matches(*argv, "show") == 0
 	    || matches(*argv, "lst") == 0)
-		return tc_filter_list(RTM_GETTFILTER, argc-1, argv+1);
+		return tc_filter_list(argc-1, argv+1);
 	if (matches(*argv, "help") == 0) {
 		usage();
 		return 0;
 	}
 	fprintf(stderr, "Command \"%s\" is unknown, try \"tc filter help\".\n",
-		*argv);
-	return -1;
-}
-
-int do_chain(int argc, char **argv)
-{
-	if (argc < 1)
-		return tc_filter_list(RTM_GETCHAIN, 0, NULL);
-	if (matches(*argv, "add") == 0) {
-		return tc_filter_modify(RTM_NEWCHAIN, NLM_F_EXCL | NLM_F_CREATE,
-					argc - 1, argv + 1);
-	} else if (matches(*argv, "delete") == 0) {
-		return tc_filter_modify(RTM_DELCHAIN, 0,
-					argc - 1, argv + 1);
-	} else if (matches(*argv, "get") == 0) {
-		return tc_filter_get(RTM_GETCHAIN, 0,
-				     argc - 1, argv + 1);
-	} else if (matches(*argv, "list") == 0 || matches(*argv, "show") == 0 ||
-		   matches(*argv, "lst") == 0) {
-		return tc_filter_list(RTM_GETCHAIN, argc - 1, argv + 1);
-	} else if (matches(*argv, "help") == 0) {
-		chain_usage();
-		return 0;
-	}
-	fprintf(stderr, "Command \"%s\" is unknown, try \"tc chain help\".\n",
 		*argv);
 	return -1;
 }

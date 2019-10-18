@@ -38,8 +38,6 @@ struct ematch *ematch_root;
 static int begin_argc;
 static char **begin_argv;
 
-static void bstr_print(FILE *fd, const struct bstr *b, int ascii);
-
 static inline void map_warning(int num, char *kind)
 {
 	fprintf(stderr,
@@ -171,44 +169,19 @@ static struct ematch_util *get_ematch_kind_num(__u16 kind)
 	return get_ematch_kind(name);
 }
 
-static int em_parse_call(struct nlmsghdr *n, struct tcf_ematch_hdr *hdr,
-			 struct ematch_util *e, struct ematch *t)
-{
-	if (e->parse_eopt_argv) {
-		int argc = 0, i = 0, ret;
-		struct bstr *args;
-		char **argv;
-
-		for (args = t->args; args; args = bstr_next(args))
-			argc++;
-		argv = calloc(argc, sizeof(char *));
-		if (!argv)
-			return -1;
-		for (args = t->args; args; args = bstr_next(args))
-			argv[i++] = args->data;
-
-		ret = e->parse_eopt_argv(n, hdr, argc, argv);
-
-		free(argv);
-		return ret;
-	}
-
-	return e->parse_eopt(n, hdr, t->args->next);
-}
-
 static int parse_tree(struct nlmsghdr *n, struct ematch *tree)
 {
 	int index = 1;
 	struct ematch *t;
 
 	for (t = tree; t; t = t->next) {
-		struct rtattr *tail;
+		struct rtattr *tail = NLMSG_TAIL(n);
 		struct tcf_ematch_hdr hdr = { .flags = t->relation };
 
 		if (t->inverted)
 			hdr.flags |= TCF_EM_INVERT;
 
-		tail = addattr_nest(n, MAX_MSG, index++);
+		addattr_l(n, MAX_MSG, index++, NULL, 0);
 
 		if (t->child) {
 			__u32 r = t->child_ref;
@@ -239,11 +212,11 @@ static int parse_tree(struct nlmsghdr *n, struct ematch *tree)
 			}
 
 			hdr.kind = num;
-			if (em_parse_call(n, &hdr, e, t) < 0)
+			if (e->parse_eopt(n, &hdr, t->args->next) < 0)
 				return -1;
 		}
 
-		addattr_nest_end(n, tail);
+		tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	}
 
 	return 0;
@@ -279,7 +252,6 @@ static int flatten_tree(struct ematch *head, struct ematch *tree)
 	return count;
 }
 
-__attribute__((format(printf, 5, 6)))
 int em_parse_error(int err, struct bstr *args, struct bstr *carg,
 		   struct ematch_util *e, char *fmt, ...)
 {
@@ -369,16 +341,18 @@ int parse_ematch(int *argc_p, char ***argv_p, int tca_id, struct nlmsghdr *n)
 			.progid = TCF_EM_PROG_TC
 		};
 
-		tail = addattr_nest(n, MAX_MSG, tca_id);
+		tail = NLMSG_TAIL(n);
+		addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 		addattr_l(n, MAX_MSG, TCA_EMATCH_TREE_HDR, &hdr, sizeof(hdr));
 
-		tail_list = addattr_nest(n, MAX_MSG, TCA_EMATCH_TREE_LIST);
+		tail_list = NLMSG_TAIL(n);
+		addattr_l(n, MAX_MSG, TCA_EMATCH_TREE_LIST, NULL, 0);
 
 		if (parse_tree(n, ematch_root) < 0)
 			return -1;
 
-		addattr_nest_end(n, tail_list);
-		addattr_nest_end(n, tail);
+		tail_list->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail_list;
+		tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	}
 
 	*argc_p = ematch_argc;
@@ -550,7 +524,7 @@ unsigned long bstrtoul(const struct bstr *b)
 	return l;
 }
 
-static void bstr_print(FILE *fd, const struct bstr *b, int ascii)
+void bstr_print(FILE *fd, const struct bstr *b, int ascii)
 {
 	int i;
 	char *s = b->data;
@@ -565,5 +539,31 @@ static void bstr_print(FILE *fd, const struct bstr *b, int ascii)
 		for (i = 0; i < b->len; i++)
 		    fprintf(fd, "%c", isprint(s[i]) ? s[i] : '.');
 		fprintf(fd, "\"");
+	}
+}
+
+void print_ematch_tree(const struct ematch *tree)
+{
+	const struct ematch *t;
+
+	for (t = tree; t; t = t->next) {
+		if (t->inverted)
+			printf("NOT ");
+
+		if (t->child) {
+			printf("(");
+			print_ematch_tree(t->child);
+			printf(")");
+		} else {
+			struct bstr *b;
+
+			for (b = t->args; b; b = b->next)
+				printf("%s%s", b->data, b->next ? " " : "");
+		}
+
+		if (t->relation == TCF_EM_REL_AND)
+			printf(" AND ");
+		else if (t->relation == TCF_EM_REL_OR)
+			printf(" OR ");
 	}
 }

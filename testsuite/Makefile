@@ -14,83 +14,66 @@ TESTS_DIR := $(dir $(TESTS))
 
 IPVERS := $(filter-out iproute2/Makefile,$(wildcard iproute2/*))
 
-KENVFN := $(shell mktemp /tmp/tc_testkenv.XXXXXX)
 ifneq (,$(wildcard /proc/config.gz))
-	KCPATH := /proc/config.gz
+	KENV := $(shell cat /proc/config.gz | gunzip | grep ^CONFIG)
 else
-	KVER := $(shell uname -r)
-	KCPATHS := /lib/modules/$(KVER)/config /boot/config-$(KVER)
-	KCPATH := $(firstword $(wildcard $(KCPATHS)))
+KVER := $(shell uname -r)
+KCPATHS := /lib/modules/$(KVER)/config /boot/config-$(KVER)
+KCPATH := $(firstword $(wildcard $(KCPATHS)))
+ifneq (,$(KCPATH))
+	KENV := $(shell cat ${KCPATH} | grep ^CONFIG)
+endif
 endif
 
 .PHONY: compile listtests alltests configure $(TESTS)
 
 configure:
-	$(MAKE) -C iproute2 configure
+	echo "Entering iproute2" && cd iproute2 && $(MAKE) configure && cd ..;
 
-compile: configure generate_nlmsg
-	$(MAKE) -C iproute2
+compile: configure
+	echo "Entering iproute2" && cd iproute2 && $(MAKE) && cd ..;
 
 listtests:
 	@for t in $(TESTS); do \
 		echo "$$t"; \
 	done
 
-generate_nlmsg:
-	$(MAKE) -C tools
+alltests: $(TESTS)
 
-alltests: generate_nlmsg $(TESTS)
-
-testclean:
+clean:
 	@echo "Removing $(RESULTS_DIR) dir ..."
 	@rm -rf $(RESULTS_DIR)
 
-clean: testclean
-	@rm -f iproute2/iproute2-this
-	@rm -f tests/ip/link/dev_wo_vf_rate.nl
-	$(MAKE) -C tools clean
-
 distclean: clean
-	$(MAKE) -C iproute2 distclean
+	echo "Entering iproute2" && cd iproute2 && $(MAKE) distclean && cd ..;
 
-$(TESTS): generate_nlmsg testclean
-ifeq (,$(IPVERS))
-	$(error Please run make first)
-endif
+$(TESTS): clean
 ifeq (,$(HAVE_UNSHARED_UTIL))
 	$(error Please install util-linux tools to run tests in separated network namespace)
 endif
 	@./tools/generate_nlmsg
 
 	@mkdir -p $(RESULTS_DIR)
-
+	
 	@for d in $(TESTS_DIR); do \
 	    mkdir -p $(RESULTS_DIR)/$$d; \
 	done
-
-	@if [ "$(KCPATH)" = "/proc/config.gz" ]; then \
-		gunzip -c $(KCPATH) >$(KENVFN); \
-	elif [ "$(KCPATH)" != "" ]; then \
-               cat $(KCPATH) >$(KENVFN); \
-	fi
-	@sed -i -e 's/^CONFIG_/export CONFIG_/' $(KENVFN)
-
+	
 	@for i in $(IPVERS); do \
 		o=`echo $$i | sed -e 's/iproute2\///'`; \
 		echo -n "Running $@ [$$o/`uname -r`]: "; \
 		TMP_ERR=`mktemp /tmp/tc_testsuite.XXXXXX`; \
 		TMP_OUT=`mktemp /tmp/tc_testsuite.XXXXXX`; \
-		. $(KENVFN); \
 		STD_ERR="$$TMP_ERR" STD_OUT="$$TMP_OUT" \
-		TC="$$i/tc/tc" IP="$$i/ip/ip" SS=$$i/misc/ss DEV="$(DEV)" IPVER="$@" SNAME="$$i" \
-		ERRF="$(RESULTS_DIR)/$@.$$o.err" $(PREFIX) tests/$@ > $(RESULTS_DIR)/$@.$$o.out; \
+		TC="$$i/tc/tc" IP="$$i/ip/ip" DEV="$(DEV)" IPVER="$@" SNAME="$$i" \
+		ERRF="$(RESULTS_DIR)/$@.$$o.err" $(KENV) $(PREFIX) tests/$@ > $(RESULTS_DIR)/$@.$$o.out; \
 		if [ "$$?" = "127" ]; then \
-			printf "\033[1;35mSKIPPED\033[0m\n"; \
+			echo "SKIPPED"; \
 		elif [ -e "$(RESULTS_DIR)/$@.$$o.err" ]; then \
-			printf "\033[0;31mFAILED\033[0m\n"; \
+			echo "FAILED"; \
 		else \
-			printf "\033[0;32mPASS\033[0m\n"; \
+			echo "PASS"; \
 		fi; \
 		rm "$$TMP_ERR" "$$TMP_OUT"; \
-		sudo dmesg > $(RESULTS_DIR)/$@.$$o.dmesg; \
+		dmesg > $(RESULTS_DIR)/$@.$$o.dmesg; \
 	done

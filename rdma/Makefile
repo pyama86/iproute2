@@ -1,13 +1,11 @@
-# SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
+# SPDX-License-Identifier: GPL-2.0
 include ../config.mk
 
 TARGETS :=
 
 ifeq ($(HAVE_MNL),y)
-CFLAGS += -I./include/uapi/
 
-RDMA_OBJ = rdma.o utils.o dev.o link.o res.o res-pd.o res-mr.o res-cq.o \
-	   res-cmid.o res-qp.o sys.o stat.o
+RDMA_OBJ = rdma.o utils.o dev.o link.o res.o
 
 TARGETS += rdma
 endif
@@ -18,9 +16,7 @@ rdma:	$(RDMA_OBJ) $(LIBS)
 	$(QUIET_LINK)$(CC) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 install: all
-	for i in $(TARGETS); \
-	do install -m 0755 $$i $(DESTDIR)$(SBINDIR); \
-	done
+	install -m 0755 $(TARGETS) $(DESTDIR)$(SBINDIR)
 
 clean:
 	rm -f $(RDMA_OBJ) $(TARGETS)

@@ -78,8 +78,6 @@ __PF(TIPC,tipc)
 __PF(AOE,aoe)
 __PF(8021Q,802.1Q)
 __PF(8021AD,802.1ad)
-__PF(MPLS_UC,mpls_uc)
-__PF(MPLS_MC,mpls_mc)
 
 { 0x8100, "802.1Q" },
 { 0x88cc, "LLDP" },
@@ -94,7 +92,7 @@ const char * ll_proto_n2a(unsigned short id, char *buf, int len)
 
 	id = ntohs(id);
 
-        for (i=0; !numeric && i<sizeof(llproto_names)/sizeof(llproto_names[0]); i++) {
+        for (i=0; i<sizeof(llproto_names)/sizeof(llproto_names[0]); i++) {
                  if (llproto_names[i].id == id)
 			return llproto_names[i].name;
 	}

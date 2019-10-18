@@ -55,6 +55,7 @@ done:
 }
 
 struct m_pedit_util p_pedit_icmp = {
-	.id = "icmp",
-	.parse_peopt = parse_icmp,
+	NULL,
+	"icmp",
+	parse_icmp,
 };

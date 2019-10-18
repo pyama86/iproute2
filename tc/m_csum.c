@@ -138,9 +138,10 @@ parse_csum(struct action_util *a, int *argc_p,
 		}
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_CSUM_PARMS, &sel, sizeof(sel));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (char *)NLMSG_TAIL(n) - (char *)tail;
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -162,7 +163,6 @@ print_csum(struct action_util *au, FILE *f, struct rtattr *arg)
 	char *uflag_5 = "";
 	char *uflag_6 = "";
 	char *uflag_7 = "";
-	SPRINT_BUF(buf);
 
 	int uflag_count = 0;
 
@@ -172,7 +172,7 @@ print_csum(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_CSUM_MAX, arg);
 
 	if (tb[TCA_CSUM_PARMS] == NULL) {
-		fprintf(stderr, "Missing csum parameters\n");
+		fprintf(f, "[NULL csum parameters]");
 		return -1;
 	}
 	sel = RTA_DATA(tb[TCA_CSUM_PARMS]);
@@ -199,16 +199,12 @@ print_csum(struct action_util *au, FILE *f, struct rtattr *arg)
 		uflag_1 = "?empty";
 	}
 
-	print_string(PRINT_ANY, "kind", "%s ", "csum");
-	snprintf(buf, sizeof(buf), "%s%s%s%s%s%s%s",
-		 uflag_1, uflag_2, uflag_3,
-		 uflag_4, uflag_5, uflag_6, uflag_7);
-	print_string(PRINT_ANY, "csum", "(%s) ", buf);
-
+	fprintf(f, "csum (%s%s%s%s%s%s%s) ",
+		uflag_1, uflag_2, uflag_3,
+		uflag_4, uflag_5, uflag_6, uflag_7);
 	print_action_control(f, "action ", sel->action, "\n");
-	print_uint(PRINT_ANY, "index", "\tindex %u", sel->index);
-	print_int(PRINT_ANY, "ref", " ref %d", sel->refcnt);
-	print_int(PRINT_ANY, "bind", " bind %d", sel->bindcnt);
+	fprintf(f, "\tindex %u ref %d bind %d", sel->index, sel->refcnt,
+		sel->bindcnt);
 
 	if (show_stats) {
 		if (tb[TCA_CSUM_TM]) {
@@ -217,7 +213,7 @@ print_csum(struct action_util *au, FILE *f, struct rtattr *arg)
 			print_tm(f, tm);
 		}
 	}
-	print_string(PRINT_FP, NULL, "%s", "\n");
+	fprintf(f, "\n");
 
 	return 0;
 }

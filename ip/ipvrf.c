@@ -36,11 +36,10 @@ static struct link_filter vrf_filter;
 
 static void usage(void)
 {
-	fprintf(stderr,
-		"Usage:	ip vrf show [NAME] ...\n"
-		"	ip vrf exec [NAME] cmd ...\n"
-		"	ip vrf identify [PID]\n"
-		"	ip vrf pids [NAME]\n");
+	fprintf(stderr, "Usage: ip vrf show [NAME] ...\n");
+	fprintf(stderr, "       ip vrf exec [NAME] cmd ...\n");
+	fprintf(stderr, "       ip vrf identify [PID]\n");
+	fprintf(stderr, "       ip vrf pids [NAME]\n");
 
 	exit(-1);
 }
@@ -442,13 +441,6 @@ out:
 	return rc;
 }
 
-static int do_switch(void *arg)
-{
-	char *vrf = arg;
-
-	return vrf_switch(vrf);
-}
-
 static int ipvrf_exec(int argc, char **argv)
 {
 	if (argc < 1) {
@@ -460,7 +452,10 @@ static int ipvrf_exec(int argc, char **argv)
 		return -1;
 	}
 
-	return -cmd_exec(argv[1], argv + 1, !!batch_mode, do_switch, argv[0]);
+	if (vrf_switch(argv[0]))
+		return -1;
+
+	return -cmd_exec(argv[1], argv + 1, !!batch_mode);
 }
 
 /* reset VRF association of current process to default VRF;
@@ -594,7 +589,7 @@ static int ipvrf_show(int argc, char **argv)
 		return 0;
 	}
 
-	if (ip_link_list(ipvrf_filter_req, &linfo) == 0) {
+	if (ip_linkaddr_list(0, ipvrf_filter_req, &linfo, NULL) == 0) {
 		struct nlmsg_list *l;
 		unsigned nvrf = 0;
 		int n;

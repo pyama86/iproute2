@@ -1,6 +1,11 @@
-// SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
 /*
  * link.c	RDMA tool
+ *
+ *              This program is free software; you can redistribute it and/or
+ *              modify it under the terms of the GNU General Public License
+ *              as published by the Free Software Foundation; either version
+ *              2 of the License, or (at your option) any later version.
+ *
  * Authors:     Leon Romanovsky <leonro@mellanox.com>
  */
 
@@ -9,16 +14,12 @@
 static int link_help(struct rd *rd)
 {
 	pr_out("Usage: %s link show [DEV/PORT_INDEX]\n", rd->filename);
-	pr_out("Usage: %s link add NAME type TYPE netdev NETDEV\n",
-	       rd->filename);
-	pr_out("Usage: %s link delete NAME\n", rd->filename);
 	return 0;
 }
 
 static const char *caps_to_str(uint32_t idx)
 {
-#define RDMA_PORT_FLAGS_LOW(x) \
-	x(RESERVED, 0) \
+#define RDMA_PORT_FLAGS(x) \
 	x(SM, 1) \
 	x(NOTICE, 2) \
 	x(TRAP, 3) \
@@ -31,9 +32,7 @@ static const char *caps_to_str(uint32_t idx)
 	x(SM_DISABLED, 10) \
 	x(SYS_IMAGE_GUID, 11) \
 	x(PKEY_SW_EXT_PORT_TRAP, 12) \
-	x(CABLE_INFO, 13) \
 	x(EXTENDED_SPEEDS, 14) \
-	x(CAP_MASK2, 15) \
 	x(CM, 16) \
 	x(SNMP_TUNNEL, 17) \
 	x(REINIT, 18) \
@@ -44,45 +43,16 @@ static const char *caps_to_str(uint32_t idx)
 	x(BOOT_MGMT, 23) \
 	x(LINK_LATENCY, 24) \
 	x(CLIENT_REG, 25) \
-	x(OTHER_LOCAL_CHANGES, 26) \
-	x(LINK_SPPED_WIDTH, 27) \
-	x(VENDOR_SPECIFIC_MADS, 28) \
-	x(MULT_PKER_TRAP, 29) \
-	x(MULT_FDB, 30) \
-	x(HIERARCHY_INFO, 31)
+	x(IP_BASED_GIDS, 26)
 
-#define RDMA_PORT_FLAGS_HIGH(x) \
-	x(SET_NODE_DESC, 0) \
-	x(EXT_INFO, 1) \
-	x(VIRT, 2) \
-	x(SWITCH_POR_STATE_TABLE, 3) \
-	x(LINK_WIDTH_2X, 4) \
-	x(LINK_SPEED_HDR, 5)
-
-	/*
-	 * Separation below is needed to allow compilation of rdmatool
-	 * on 32bits systems. On such systems, C-enum is limited to be
-	 * int and can't hold more than 32 bits.
-	 */
-	enum { RDMA_PORT_FLAGS_LOW(RDMA_BITMAP_ENUM) };
-	enum { RDMA_PORT_FLAGS_HIGH(RDMA_BITMAP_ENUM) };
+	enum { RDMA_PORT_FLAGS(RDMA_BITMAP_ENUM) };
 
 	static const char * const
-		rdma_port_names_low[] = { RDMA_PORT_FLAGS_LOW(RDMA_BITMAP_NAMES) };
-	static const char * const
-		rdma_port_names_high[] = { RDMA_PORT_FLAGS_HIGH(RDMA_BITMAP_NAMES) };
-	uint32_t high_idx;
-	#undef RDMA_PORT_FLAGS_LOW
-	#undef RDMA_PORT_FLAGS_HIGH
+		rdma_port_names[] = { RDMA_PORT_FLAGS(RDMA_BITMAP_NAMES) };
+	#undef RDMA_PORT_FLAGS
 
-	if (idx < ARRAY_SIZE(rdma_port_names_low) && rdma_port_names_low[idx])
-		return rdma_port_names_low[idx];
-
-	high_idx = idx - ARRAY_SIZE(rdma_port_names_low);
-	if (high_idx < ARRAY_SIZE(rdma_port_names_high) &&
-	    rdma_port_names_high[high_idx])
-		return rdma_port_names_high[high_idx];
-
+	if (idx < ARRAY_SIZE(rdma_port_names) && rdma_port_names[idx])
+		return rdma_port_names[idx];
 	return "UNKNOWN";
 }
 
@@ -235,26 +205,6 @@ static void link_print_phys_state(struct rd *rd, struct nlattr **tb)
 		pr_out("physical_state %s ", phys_state_to_str(phys_state));
 }
 
-static void link_print_netdev(struct rd *rd, struct nlattr **tb)
-{
-	const char *netdev_name;
-	uint32_t idx;
-
-	if (!tb[RDMA_NLDEV_ATTR_NDEV_NAME] || !tb[RDMA_NLDEV_ATTR_NDEV_INDEX])
-		return;
-
-	netdev_name = mnl_attr_get_str(tb[RDMA_NLDEV_ATTR_NDEV_NAME]);
-	idx = mnl_attr_get_u32(tb[RDMA_NLDEV_ATTR_NDEV_INDEX]);
-	if (rd->json_output) {
-		jsonw_string_field(rd->jw, "netdev", netdev_name);
-		jsonw_uint_field(rd->jw, "netdev_index", idx);
-	} else {
-		pr_out("netdev %s ", netdev_name);
-		if (rd->show_details)
-			pr_out("netdev_index %u ", idx);
-	}
-}
-
 static int link_parse_cb(const struct nlmsghdr *nlh, void *data)
 {
 	struct nlattr *tb[RDMA_NLDEV_ATTR_MAX] = {};
@@ -291,7 +241,6 @@ static int link_parse_cb(const struct nlmsghdr *nlh, void *data)
 	link_print_lmc(rd, tb);
 	link_print_state(rd, tb);
 	link_print_phys_state(rd, tb);
-	link_print_netdev(rd, tb);
 	if (rd->show_details)
 		link_print_caps(rd, tb);
 
@@ -339,85 +288,10 @@ static int link_show(struct rd *rd)
 	return rd_exec_link(rd, link_one_show, true);
 }
 
-static int link_add_netdev(struct rd *rd)
-{
-	char *link_netdev;
-	uint32_t seq;
-
-	if (rd_no_arg(rd)) {
-		pr_err("Please provide a net device name.\n");
-		return -EINVAL;
-	}
-
-	link_netdev = rd_argv(rd);
-	rd_prepare_msg(rd, RDMA_NLDEV_CMD_NEWLINK, &seq,
-		       (NLM_F_REQUEST | NLM_F_ACK));
-	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_DEV_NAME, rd->link_name);
-	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_LINK_TYPE, rd->link_type);
-	mnl_attr_put_strz(rd->nlh, RDMA_NLDEV_ATTR_NDEV_NAME, link_netdev);
-	return rd_sendrecv_msg(rd, seq);
-}
-
-static int link_add_type(struct rd *rd)
-{
-	const struct rd_cmd cmds[] = {
-		{ NULL,		link_help},
-		{ "netdev",	link_add_netdev},
-		{ 0 }
-	};
-
-	if (rd_no_arg(rd)) {
-		pr_err("Please provide a link type name.\n");
-		return -EINVAL;
-	}
-	rd->link_type = rd_argv(rd);
-	rd_arg_inc(rd);
-	return rd_exec_cmd(rd, cmds, "parameter");
-}
-
-static int link_add(struct rd *rd)
-{
-	const struct rd_cmd cmds[] = {
-		{ NULL,		link_help},
-		{ "type",	link_add_type},
-		{ 0 }
-	};
-
-	if (rd_no_arg(rd)) {
-		pr_err("Please provide a link name to add.\n");
-		return -EINVAL;
-	}
-	rd->link_name = rd_argv(rd);
-	rd_arg_inc(rd);
-
-	return rd_exec_cmd(rd, cmds, "parameter");
-}
-
-static int _link_del(struct rd *rd)
-{
-	uint32_t seq;
-
-	if (!rd_no_arg(rd)) {
-		pr_err("Unknown parameter %s\n", rd_argv(rd));
-		return -EINVAL;
-	}
-	rd_prepare_msg(rd, RDMA_NLDEV_CMD_DELLINK, &seq,
-		       (NLM_F_REQUEST | NLM_F_ACK));
-	mnl_attr_put_u32(rd->nlh, RDMA_NLDEV_ATTR_DEV_INDEX, rd->dev_idx);
-	return rd_sendrecv_msg(rd, seq);
-}
-
-static int link_del(struct rd *rd)
-{
-	return rd_exec_require_dev(rd, _link_del);
-}
-
 int cmd_link(struct rd *rd)
 {
 	const struct rd_cmd cmds[] = {
 		{ NULL,		link_show },
-		{ "add",	link_add },
-		{ "delete",	link_del },
 		{ "show",	link_show },
 		{ "list",	link_show },
 		{ "help",	link_help },

@@ -98,17 +98,19 @@ static int htb_parse_opt(struct qdisc_util *qu, int argc,
 		}
 		argc--; argv++;
 	}
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 	addattr_l(n, 2024, TCA_HTB_INIT, &opt, NLMSG_ALIGN(sizeof(opt)));
 	if (direct_qlen != ~0U)
 		addattr_l(n, 2024, TCA_HTB_DIRECT_QLEN,
 			  &direct_qlen, sizeof(direct_qlen));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 
 static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, struct nlmsghdr *n, const char *dev)
 {
+	int ok = 0;
 	struct tc_htb_opt opt = {};
 	__u32 rtab[256], ctab[256];
 	unsigned buffer = 0, cbuffer = 0;
@@ -126,6 +128,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 			if (get_u32(&opt.prio, *argv, 10)) {
 				explain1("prio"); return -1;
 			}
+			ok++;
 		} else if (matches(*argv, "mtu") == 0) {
 			NEXT_ARG();
 			if (get_u32(&mtu, *argv, 10)) {
@@ -159,6 +162,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 				explain1("buffer");
 				return -1;
 			}
+			ok++;
 		} else if (matches(*argv, "cburst") == 0 ||
 			   strcmp(*argv, "cbuffer") == 0 ||
 			   strcmp(*argv, "cmaxburst") == 0) {
@@ -167,6 +171,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 				explain1("cbuffer");
 				return -1;
 			}
+			ok++;
 		} else if (strcmp(*argv, "ceil") == 0) {
 			NEXT_ARG();
 			if (ceil64) {
@@ -182,6 +187,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 				explain1("ceil");
 				return -1;
 			}
+			ok++;
 		} else if (strcmp(*argv, "rate") == 0) {
 			NEXT_ARG();
 			if (rate64) {
@@ -197,6 +203,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 				explain1("rate");
 				return -1;
 			}
+			ok++;
 		} else if (strcmp(*argv, "help") == 0) {
 			explain();
 			return -1;
@@ -207,6 +214,9 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 		}
 		argc--; argv++;
 	}
+
+	/*	if (!ok)
+		return 0;*/
 
 	if (!rate64) {
 		fprintf(stderr, "\"rate\" is required.\n");
@@ -244,7 +254,8 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 	}
 	opt.cbuffer = tc_calc_xmittime(ceil64, cbuffer);
 
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 
 	if (rate64 >= (1ULL << 32))
 		addattr_l(n, 1124, TCA_HTB_RATE64, &rate64, sizeof(rate64));
@@ -255,7 +266,7 @@ static int htb_parse_class_opt(struct qdisc_util *qu, int argc, char **argv, str
 	addattr_l(n, 2024, TCA_HTB_PARMS, &opt, sizeof(opt));
 	addattr_l(n, 3024, TCA_HTB_RTAB, rtab, 1024);
 	addattr_l(n, 4024, TCA_HTB_CTAB, ctab, 1024);
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 
@@ -282,9 +293,9 @@ static int htb_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 		if (RTA_PAYLOAD(tb[TCA_HTB_PARMS])  < sizeof(*hopt)) return -1;
 
 		if (!hopt->level) {
-			print_int(PRINT_ANY, "prio", "prio %d ", (int)hopt->prio);
+			print_int(PRINT_ANY, "prio", "prio ", (int)hopt->prio);
 			if (show_details)
-				print_int(PRINT_ANY, "quantum", "quantum %d ",
+				print_int(PRINT_ANY, "quantum", "quantum ",
 					  (int)hopt->quantum);
 		}
 
@@ -332,7 +343,7 @@ static int htb_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 		if (RTA_PAYLOAD(tb[TCA_HTB_INIT])  < sizeof(*gopt)) return -1;
 
 		print_int(PRINT_ANY, "r2q", "r2q %d", gopt->rate2quantum);
-		print_0xhex(PRINT_ANY, "default", " default %#llx", gopt->defcls);
+		print_uint(PRINT_ANY, "default", " default %u", gopt->defcls);
 		print_uint(PRINT_ANY, "direct_packets_stat",
 			   " direct_packets_stat %u", gopt->direct_pkts);
 		if (show_details) {

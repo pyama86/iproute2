@@ -59,8 +59,6 @@ ip-xfrm \- transform configuration
 .IR CTX " ]"
 .RB "[ " extra-flag
 .IR EXTRA-FLAG-LIST " ]"
-.RB "[ " output-mark
-.IR OUTPUT-MARK " ]"
 
 .ti -8
 .B "ip xfrm state allocspi"
@@ -89,19 +87,8 @@ ip-xfrm \- transform configuration
 .IR MASK " ] ]"
 
 .ti -8
-.BR ip " [ " -4 " | " -6 " ] " "xfrm state deleteall" " ["
+.BR "ip xfrm state" " { " deleteall " | " list " } ["
 .IR ID " ]"
-.RB "[ " mode
-.IR MODE " ]"
-.RB "[ " reqid
-.IR REQID " ]"
-.RB "[ " flag
-.IR FLAG-LIST " ]"
-
-.ti -8
-.BR ip " [ " -4 " | " -6 " ] " "xfrm state list" " ["
-.IR ID " ]"
-.RB "[ " nokeys " ]"
 .RB "[ " mode
 .IR MODE " ]"
 .RB "[ " reqid
@@ -257,7 +244,7 @@ ip-xfrm \- transform configuration
 .IR PTYPE " ]"
 
 .ti -8
-.BR ip " [ " -4 " | " -6 " ] " "xfrm policy" " { " deleteall " | " list " }"
+.BR "ip xfrm policy" " { " deleteall " | " list " }"
 .RB "[ " nosock " ]"
 .RI "[ " SELECTOR " ]"
 .RB "[ " dir
@@ -391,8 +378,6 @@ ip-xfrm \- transform configuration
 .ti -8
 .BR "ip xfrm monitor" " ["
 .BI all-nsid
-] [
-.BI nokeys
 ] [
 .BI all
  |
@@ -551,15 +536,6 @@ encapsulates packets with protocol
 .BR espinudp " or " espinudp-nonike ","
 .RI "using source port " SPORT ", destination port "  DPORT
 .RI ", and original address " OADDR "."
-
-.TP
-.I MARK
-used to match xfrm policies and states
-
-.TP
-.I OUTPUT-MARK
-used to set the output mark to influence the routing
-of the packets emitted by the state
 
 .sp
 .PP

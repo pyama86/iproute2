@@ -5,6 +5,8 @@
 #include <asm/types.h>
 #include <linux/pkt_sched.h>
 
+#define TIME_UNITS_PER_SEC	1000000
+
 enum link_layer {
 	LINKLAYER_UNSPEC,
 	LINKLAYER_ETHERNET,

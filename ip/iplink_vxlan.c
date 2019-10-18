@@ -27,34 +27,32 @@ static void print_explain(FILE *f)
 {
 	fprintf(f,
 		"Usage: ... vxlan id VNI\n"
-		"		[ { group | remote } IP_ADDRESS ]\n"
-		"		[ local ADDR ]\n"
-		"		[ ttl TTL ]\n"
-		"		[ tos TOS ]\n"
-		"		[ df DF ]\n"
-		"		[ flowlabel LABEL ]\n"
-		"		[ dev PHYS_DEV ]\n"
-		"		[ dstport PORT ]\n"
-		"		[ srcport MIN MAX ]\n"
-		"		[ [no]learning ]\n"
-		"		[ [no]proxy ]\n"
-		"		[ [no]rsc ]\n"
-		"		[ [no]l2miss ]\n"
-		"		[ [no]l3miss ]\n"
-		"		[ ageing SECONDS ]\n"
-		"		[ maxaddress NUMBER ]\n"
-		"		[ [no]udpcsum ]\n"
-		"		[ [no]udp6zerocsumtx ]\n"
-		"		[ [no]udp6zerocsumrx ]\n"
-		"		[ [no]remcsumtx ] [ [no]remcsumrx ]\n"
-		"		[ [no]external ] [ gbp ] [ gpe ]\n"
+		"                 [ { group | remote } IP_ADDRESS ]\n"
+		"                 [ local ADDR ]\n"
+		"                 [ ttl TTL ]\n"
+		"                 [ tos TOS ]\n"
+		"                 [ flowlabel LABEL ]\n"
+		"                 [ dev PHYS_DEV ]\n"
+		"                 [ dstport PORT ]\n"
+		"                 [ srcport MIN MAX ]\n"
+		"                 [ [no]learning ]\n"
+		"                 [ [no]proxy ]\n"
+		"                 [ [no]rsc ]\n"
+		"                 [ [no]l2miss ]\n"
+		"                 [ [no]l3miss ]\n"
+		"                 [ ageing SECONDS ]\n"
+		"                 [ maxaddress NUMBER ]\n"
+		"                 [ [no]udpcsum ]\n"
+		"                 [ [no]udp6zerocsumtx ]\n"
+		"                 [ [no]udp6zerocsumrx ]\n"
+		"                 [ [no]remcsumtx ] [ [no]remcsumrx ]\n"
+		"                 [ [no]external ] [ gbp ] [ gpe ]\n"
 		"\n"
-		"Where:	VNI	:= 0-16777215\n"
-		"	ADDR	:= { IP_ADDRESS | any }\n"
-		"	TOS	:= { NUMBER | inherit }\n"
-		"	TTL	:= { 1..255 | auto | inherit }\n"
-		"	DF	:= { unset | set | inherit }\n"
-		"	LABEL := 0-1048575\n"
+		"Where: VNI   := 0-16777215\n"
+		"       ADDR  := { IP_ADDRESS | any }\n"
+		"       TOS   := { NUMBER | inherit }\n"
+		"       TTL   := { 1..255 | inherit }\n"
+		"       LABEL := 0-1048575\n"
 	);
 }
 
@@ -76,7 +74,8 @@ static void check_duparg(__u64 *attrs, int type, const char *key,
 static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 			  struct nlmsghdr *n)
 {
-	inet_prefix saddr, daddr;
+	inet_prefix saddr;
+	inet_prefix daddr;
 	__u32 vni = 0;
 	__u8 learning = 1;
 	__u16 dstport = 0;
@@ -84,12 +83,9 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 	__u64 attrs = 0;
 	bool set_op = (n->nlmsg_type == RTM_NEWLINK &&
 		       !(n->nlmsg_flags & NLM_F_CREATE));
-	bool selected_family = false;
 
 	saddr.family = daddr.family = AF_UNSPEC;
-
-	inet_prefix_reset(&saddr);
-	inet_prefix_reset(&daddr);
+	saddr.flags = daddr.flags = 0;
 
 	while (argc > 0) {
 		if (!matches(*argv, "id") ||
@@ -136,8 +132,11 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 			NEXT_ARG();
 			check_duparg(&attrs, IFLA_VXLAN_LINK, "dev", *argv);
 			link = ll_name_to_index(*argv);
-			if (!link)
-				exit(nodev(*argv));
+			if (link == 0) {
+				fprintf(stderr, "Cannot find device \"%s\"\n",
+					*argv);
+				exit(-1);
+			}
 			addattr32(n, 1024, IFLA_VXLAN_LINK, link);
 		} else if (!matches(*argv, "ttl") ||
 			   !matches(*argv, "hoplimit")) {
@@ -146,18 +145,14 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 
 			NEXT_ARG();
 			check_duparg(&attrs, IFLA_VXLAN_TTL, "ttl", *argv);
-			if (strcmp(*argv, "inherit") == 0) {
-				addattr(n, 1024, IFLA_VXLAN_TTL_INHERIT);
-			} else if (strcmp(*argv, "auto") == 0) {
-				addattr8(n, 1024, IFLA_VXLAN_TTL, ttl);
-			} else {
+			if (strcmp(*argv, "inherit") != 0) {
 				if (get_unsigned(&uval, *argv, 0))
 					invarg("invalid TTL", *argv);
 				if (uval > 255)
 					invarg("TTL must be <= 255", *argv);
 				ttl = uval;
-				addattr8(n, 1024, IFLA_VXLAN_TTL, ttl);
 			}
+			addattr8(n, 1024, IFLA_VXLAN_TTL, ttl);
 		} else if (!matches(*argv, "tos") ||
 			   !matches(*argv, "dsfield")) {
 			__u32 uval;
@@ -172,22 +167,6 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 			} else
 				tos = 1;
 			addattr8(n, 1024, IFLA_VXLAN_TOS, tos);
-		} else if (!matches(*argv, "df")) {
-			enum ifla_vxlan_df df;
-
-			NEXT_ARG();
-			check_duparg(&attrs, IFLA_VXLAN_DF, "df", *argv);
-			if (strcmp(*argv, "unset") == 0)
-				df = VXLAN_DF_UNSET;
-			else if (strcmp(*argv, "set") == 0)
-				df = VXLAN_DF_SET;
-			else if (strcmp(*argv, "inherit") == 0)
-				df = VXLAN_DF_INHERIT;
-			else
-				invarg("DF must be 'unset', 'set' or 'inherit'",
-				       *argv);
-
-			addattr8(n, 1024, IFLA_VXLAN_DF, df);
 		} else if (!matches(*argv, "label") ||
 			   !matches(*argv, "flowlabel")) {
 			__u32 uval;
@@ -375,26 +354,12 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 		int type = (saddr.family == AF_INET) ? IFLA_VXLAN_LOCAL
 						     : IFLA_VXLAN_LOCAL6;
 		addattr_l(n, 1024, type, saddr.data, saddr.bytelen);
-		selected_family = true;
 	}
 
 	if (is_addrtype_inet(&daddr)) {
 		int type = (daddr.family == AF_INET) ? IFLA_VXLAN_GROUP
 						     : IFLA_VXLAN_GROUP6;
 		addattr_l(n, 1024, type, daddr.data, daddr.bytelen);
-		selected_family = true;
-	}
-
-	if (!selected_family) {
-		if (preferred_family == AF_INET) {
-			get_addr(&daddr, "default", AF_INET);
-			addattr_l(n, 1024, IFLA_VXLAN_GROUP,
-				  daddr.data, daddr.bytelen);
-		} else if (preferred_family == AF_INET6) {
-			get_addr(&daddr, "default", AF_INET6);
-			addattr_l(n, 1024, IFLA_VXLAN_GROUP6,
-				  daddr.data, daddr.bytelen);
-		}
 	}
 
 	if (!set_op || VXLAN_ATTRSET(attrs, IFLA_VXLAN_LEARNING))
@@ -418,7 +383,7 @@ static void vxlan_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 
 	if (tb[IFLA_VXLAN_COLLECT_METADATA] &&
 	    rta_getattr_u8(tb[IFLA_VXLAN_COLLECT_METADATA])) {
-		print_bool(PRINT_ANY, "external", "external ", true);
+		print_bool(PRINT_ANY, "external", "external", true);
 		return;
 	}
 
@@ -540,39 +505,26 @@ static void vxlan_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 		tos = rta_getattr_u8(tb[IFLA_VXLAN_TOS]);
 	if (tos) {
 		if (is_json_context() || tos != 1)
-			print_0xhex(PRINT_ANY, "tos", "tos %#llx ", tos);
+			print_0xhex(PRINT_ANY, "tos", "tos 0x%x ", tos);
 		else
 			print_string(PRINT_FP, NULL, "tos %s ", "inherit");
 	}
 
-	if (tb[IFLA_VXLAN_TTL_INHERIT] &&
-	    rta_getattr_u8(tb[IFLA_VXLAN_TTL_INHERIT])) {
-		print_string(PRINT_FP, NULL, "ttl %s ", "inherit");
-	} else if (tb[IFLA_VXLAN_TTL]) {
+	if (tb[IFLA_VXLAN_TTL])
 		ttl = rta_getattr_u8(tb[IFLA_VXLAN_TTL]);
-		if (is_json_context() || ttl)
-			print_uint(PRINT_ANY, "ttl", "ttl %u ", ttl);
-		else
-			print_string(PRINT_FP, NULL, "ttl %s ", "auto");
-	}
-
-	if (tb[IFLA_VXLAN_DF]) {
-		enum ifla_vxlan_df df = rta_getattr_u8(tb[IFLA_VXLAN_DF]);
-
-		if (df == VXLAN_DF_UNSET)
-			print_string(PRINT_JSON, "df", "df %s ", "unset");
-		else if (df == VXLAN_DF_SET)
-			print_string(PRINT_ANY, "df", "df %s ", "set");
-		else if (df == VXLAN_DF_INHERIT)
-			print_string(PRINT_ANY, "df", "df %s ", "inherit");
-	}
+	if (is_json_context() || ttl)
+		print_uint(PRINT_ANY, "ttl", "ttl %u ", ttl);
+	else
+		print_string(PRINT_FP, NULL, "ttl %s ", "inherit");
 
 	if (tb[IFLA_VXLAN_LABEL]) {
 		__u32 label = rta_getattr_u32(tb[IFLA_VXLAN_LABEL]);
 
 		if (label)
-			print_0xhex(PRINT_ANY, "label",
-				    "flowlabel %#llx ", ntohl(label));
+			print_0xhex(PRINT_ANY,
+				    "label",
+				    "flowlabel %#x ",
+				    ntohl(label));
 	}
 
 	if (tb[IFLA_VXLAN_AGEING]) {

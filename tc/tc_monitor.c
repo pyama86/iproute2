@@ -34,7 +34,8 @@ static void usage(void)
 }
 
 
-static int accept_tcmsg(struct rtnl_ctrl_data *ctrl,
+static int accept_tcmsg(const struct sockaddr_nl *who,
+			struct rtnl_ctrl_data *ctrl,
 			struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
@@ -42,24 +43,21 @@ static int accept_tcmsg(struct rtnl_ctrl_data *ctrl,
 	if (timestamp)
 		print_timestamp(fp);
 
-	if (n->nlmsg_type == RTM_NEWTFILTER ||
-	    n->nlmsg_type == RTM_DELTFILTER ||
-	    n->nlmsg_type == RTM_NEWCHAIN ||
-	    n->nlmsg_type == RTM_DELCHAIN) {
-		print_filter(n, arg);
+	if (n->nlmsg_type == RTM_NEWTFILTER || n->nlmsg_type == RTM_DELTFILTER) {
+		print_filter(who, n, arg);
 		return 0;
 	}
 	if (n->nlmsg_type == RTM_NEWTCLASS || n->nlmsg_type == RTM_DELTCLASS) {
-		print_class(n, arg);
+		print_class(who, n, arg);
 		return 0;
 	}
 	if (n->nlmsg_type == RTM_NEWQDISC || n->nlmsg_type == RTM_DELQDISC) {
-		print_qdisc(n, arg);
+		print_qdisc(who, n, arg);
 		return 0;
 	}
 	if (n->nlmsg_type == RTM_GETACTION || n->nlmsg_type == RTM_NEWACTION ||
 	    n->nlmsg_type == RTM_DELACTION) {
-		print_action(n, arg);
+		print_action(who, n, arg);
 		return 0;
 	}
 	if (n->nlmsg_type != NLMSG_ERROR && n->nlmsg_type != NLMSG_NOOP &&

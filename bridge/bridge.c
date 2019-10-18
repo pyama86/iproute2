@@ -16,19 +16,18 @@
 #include "utils.h"
 #include "br_common.h"
 #include "namespace.h"
-#include "color.h"
 
 struct rtnl_handle rth = { .fd = -1 };
 int preferred_family = AF_UNSPEC;
 int oneline;
 int show_stats;
 int show_details;
-static int color;
 int compress_vlans;
-int json;
+int json_output;
 int timestamp;
-static const char *batch_file;
+char *batch_file;
 int force;
+const char *_SL_;
 
 static void usage(void) __attribute__((noreturn));
 
@@ -40,7 +39,7 @@ static void usage(void)
 "where	OBJECT := { link | fdb | mdb | vlan | monitor }\n"
 "	OPTIONS := { -V[ersion] | -s[tatistics] | -d[etails] |\n"
 "		     -o[neline] | -t[imestamp] | -n[etns] name |\n"
-"		     -c[ompressvlans] -color -p[retty] -j[son] }\n");
+"		     -c[ompressvlans] -j{son} }\n");
 	exit(-1);
 }
 
@@ -96,8 +95,6 @@ static int batch(const char *name)
 		fprintf(stderr, "Cannot open rtnetlink\n");
 		return EXIT_FAILURE;
 	}
-
-	rtnl_set_strict_dump(&rth);
 
 	cmdlineno = 0;
 	while (getcmdline(&line, &len, stdin) != -1) {
@@ -175,13 +172,10 @@ main(int argc, char **argv)
 				exit(-1);
 		} else if (matches(opt, "-compressvlans") == 0) {
 			++compress_vlans;
-		} else if (matches_color(opt, &color)) {
 		} else if (matches(opt, "-force") == 0) {
 			++force;
 		} else if (matches(opt, "-json") == 0) {
-			++json;
-		} else if (matches(opt, "-pretty") == 0) {
-			++pretty;
+			++json_output;
 		} else if (matches(opt, "-batch") == 0) {
 			argc--;
 			argv++;
@@ -199,15 +193,11 @@ main(int argc, char **argv)
 
 	_SL_ = oneline ? "\\" : "\n";
 
-	check_enable_color(color, json);
-
 	if (batch_file)
 		return batch(batch_file);
 
 	if (rtnl_open(&rth, 0) < 0)
 		exit(1);
-
-	rtnl_set_strict_dump(&rth);
 
 	if (argc > 1)
 		return do_cmd(argv[1], argc-1, argv+1);

@@ -25,7 +25,6 @@
 #include "rt_names.h"
 #include "utils.h"
 #include "ip_common.h"
-#include "json_print.h"
 
 extern struct rtnl_handle rth;
 
@@ -42,7 +41,7 @@ static void usage(void)
 	exit(-1);
 }
 
-static int print_token(struct nlmsghdr *n, void *arg)
+static int print_token(const struct sockaddr_nl *who, struct nlmsghdr *n, void *arg)
 {
 	struct rtnl_dump_args *args = arg;
 	FILE *fp = args->fp;
@@ -60,9 +59,9 @@ static int print_token(struct nlmsghdr *n, void *arg)
 		return -1;
 
 	if (ifi->ifi_family != AF_INET6)
-		return 0;
+		return -1;
 	if (ifi->ifi_index == 0)
-		return 0;
+		return -1;
 	if (ifindex > 0 && ifi->ifi_index != ifindex)
 		return 0;
 	if (ifi->ifi_flags & (IFF_LOOPBACK | IFF_NOARP))
@@ -78,17 +77,9 @@ static int print_token(struct nlmsghdr *n, void *arg)
 		return -1;
 	}
 
-	open_json_object(NULL);
-	print_string(PRINT_FP, NULL, "token ", NULL);
-	print_color_string(PRINT_ANY,
-			   ifa_family_color(ifi->ifi_family),
-			   "token", "%s",
-			   format_host_rta(ifi->ifi_family, ltb[IFLA_INET6_TOKEN]));
-	print_string(PRINT_FP, NULL, " dev ", NULL);
-	print_color_string(PRINT_ANY, COLOR_IFNAME,
-			   "ifname", "%s\n",
-			   ll_index_to_name(ifi->ifi_index));
-	close_json_object();
+	fprintf(fp, "token %s dev %s\n",
+	        format_host_rta(ifi->ifi_family, ltb[IFLA_INET6_TOKEN]),
+	        ll_index_to_name(ifi->ifi_index));
 	fflush(fp);
 
 	return 0;
@@ -109,18 +100,15 @@ static int iptoken_list(int argc, char **argv)
 		argc--; argv++;
 	}
 
-	if (rtnl_linkdump_req(&rth, af) < 0) {
+	if (rtnl_wilddump_request(&rth, af, RTM_GETLINK) < 0) {
 		perror("Cannot send dump request");
 		return -1;
 	}
 
-	new_json_obj(json);
 	if (rtnl_dump_filter(&rth, print_token, &da) < 0) {
-		delete_json_obj();
 		fprintf(stderr, "Dump terminated\n");
 		return -1;
 	}
-	delete_json_obj();
 
 	return 0;
 }

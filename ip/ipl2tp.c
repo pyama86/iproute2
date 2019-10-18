@@ -42,6 +42,8 @@ struct l2tp_parm {
 	uint32_t peer_tunnel_id;
 	uint32_t session_id;
 	uint32_t peer_session_id;
+	uint32_t offset;
+	uint32_t peer_offset;
 	enum l2tp_encap_type encap;
 	uint16_t local_udp_port;
 	uint16_t peer_udp_port;
@@ -53,11 +55,14 @@ struct l2tp_parm {
 	inet_prefix peer_ip;
 
 	uint16_t pw_type;
+	uint16_t mtu;
 	unsigned int udp6_csum_tx:1;
 	unsigned int udp6_csum_rx:1;
 	unsigned int udp_csum:1;
 	unsigned int recv_seq:1;
 	unsigned int send_seq:1;
+	unsigned int lns_mode:1;
+	unsigned int data_seq:2;
 	unsigned int tunnel:1;
 	unsigned int session:1;
 	int reorder_timeout;
@@ -156,13 +161,21 @@ static int create_session(struct l2tp_parm *p)
 	addattr8(&req.n, 1024, L2TP_ATTR_L2SPEC_TYPE, p->l2spec_type);
 	addattr8(&req.n, 1024, L2TP_ATTR_L2SPEC_LEN, p->l2spec_len);
 
+	if (p->mtu)
+		addattr16(&req.n, 1024, L2TP_ATTR_MTU, p->mtu);
 	if (p->recv_seq)
 		addattr8(&req.n, 1024, L2TP_ATTR_RECV_SEQ, 1);
 	if (p->send_seq)
 		addattr8(&req.n, 1024, L2TP_ATTR_SEND_SEQ, 1);
+	if (p->lns_mode)
+		addattr(&req.n, 1024, L2TP_ATTR_LNS_MODE);
+	if (p->data_seq)
+		addattr8(&req.n, 1024, L2TP_ATTR_DATA_SEQ, p->data_seq);
 	if (p->reorder_timeout)
 		addattr64(&req.n, 1024, L2TP_ATTR_RECV_TIMEOUT,
 					  p->reorder_timeout);
+	if (p->offset)
+		addattr16(&req.n, 1024, L2TP_ATTR_OFFSET, p->offset);
 	if (p->cookie_len)
 		addattr_l(&req.n, 1024, L2TP_ATTR_COOKIE,
 			  p->cookie, p->cookie_len);
@@ -191,22 +204,15 @@ static int delete_session(struct l2tp_parm *p)
 	return 0;
 }
 
-static void print_cookie(const char *name, const char *fmt,
-			 const uint8_t *cookie, int len)
+static void print_cookie(char *name, const uint8_t *cookie, int len)
 {
-	char abuf[32];
-	size_t n;
-
-	n = snprintf(abuf, sizeof(abuf),
-		     "%02x%02x%02x%02x",
-		     cookie[0], cookie[1], cookie[2], cookie[3]);
+	printf("  %s %02x%02x%02x%02x", name,
+	       cookie[0], cookie[1],
+	       cookie[2], cookie[3]);
 	if (len == 8)
-		snprintf(abuf + n, sizeof(abuf) - n,
-			 "%02x%02x%02x%02x",
-			 cookie[4], cookie[5],
-			 cookie[6], cookie[7]);
-
-	print_string(PRINT_ANY, name, fmt, abuf);
+		printf("%02x%02x%02x%02x",
+		       cookie[4], cookie[5],
+		       cookie[6], cookie[7]);
 }
 
 static void print_tunnel(const struct l2tp_data *data)
@@ -214,117 +220,74 @@ static void print_tunnel(const struct l2tp_data *data)
 	const struct l2tp_parm *p = &data->config;
 	char buf[INET6_ADDRSTRLEN];
 
-	open_json_object(NULL);
-	print_uint(PRINT_ANY, "tunnel_id", "Tunnel %u,", p->tunnel_id);
-	print_string(PRINT_ANY, "encap", " encap %s",
-		     p->encap == L2TP_ENCAPTYPE_UDP ? "UDP" :
-		     p->encap == L2TP_ENCAPTYPE_IP ? "IP" : "??");
-	print_nl();
-
-	print_string(PRINT_ANY, "local", "  From %s ",
-		     inet_ntop(p->local_ip.family, p->local_ip.data,
-			       buf, sizeof(buf)));
-	print_string(PRINT_ANY, "peer", "to %s",
-		     inet_ntop(p->peer_ip.family, p->peer_ip.data,
-			       buf, sizeof(buf)));
-	print_nl();
-
-	print_uint(PRINT_ANY, "peer_tunnel", "  Peer tunnel %u",
-		   p->peer_tunnel_id);
-	print_nl();
+	printf("Tunnel %u, encap %s\n",
+	       p->tunnel_id,
+	       p->encap == L2TP_ENCAPTYPE_UDP ? "UDP" :
+	       p->encap == L2TP_ENCAPTYPE_IP ? "IP" : "??");
+	printf("  From %s ",
+	       inet_ntop(p->local_ip.family, p->local_ip.data,
+			 buf, sizeof(buf)));
+	printf("to %s\n",
+	       inet_ntop(p->peer_ip.family, p->peer_ip.data,
+			 buf, sizeof(buf)));
+	printf("  Peer tunnel %u\n",
+	       p->peer_tunnel_id);
 
 	if (p->encap == L2TP_ENCAPTYPE_UDP) {
-		print_string(PRINT_FP, NULL,
-			     "  UDP source / dest ports:", NULL);
-
-		print_hu(PRINT_ANY, "local_port", " %hu",
-			   p->local_udp_port);
-		print_hu(PRINT_ANY, "peer_port", "/%hu",
-			   p->peer_udp_port);
-		print_nl();
+		printf("  UDP source / dest ports: %hu/%hu\n",
+		       p->local_udp_port, p->peer_udp_port);
 
 		switch (p->local_ip.family) {
 		case AF_INET:
-			print_bool(PRINT_JSON, "checksum",
-				   NULL, p->udp_csum);
-			print_string(PRINT_FP, NULL,
-				     "  UDP checksum: %s\n",
-				     p->udp_csum ? "enabled" : "disabled");
+			printf("  UDP checksum: %s\n",
+			       p->udp_csum ? "enabled" : "disabled");
 			break;
 		case AF_INET6:
-			if (is_json_context()) {
-				print_bool(PRINT_JSON, "checksum_tx",
-					   NULL, p->udp6_csum_tx);
-
-				print_bool(PRINT_JSON, "checksum_rx",
-					   NULL, p->udp6_csum_tx);
-			} else {
-				printf("  UDP checksum: %s%s%s%s\n",
-				       p->udp6_csum_tx && p->udp6_csum_rx
-				       ? "enabled" : "",
-				       p->udp6_csum_tx && !p->udp6_csum_rx
-				       ? "tx" : "",
-				       !p->udp6_csum_tx && p->udp6_csum_rx
-				       ? "rx" : "",
-				       !p->udp6_csum_tx && !p->udp6_csum_rx
-				       ? "disabled" : "");
-			}
+			printf("  UDP checksum: %s%s%s%s\n",
+			       p->udp6_csum_tx && p->udp6_csum_rx
+			       ? "enabled" : "",
+			       p->udp6_csum_tx && !p->udp6_csum_rx
+			       ? "tx" : "",
+			       !p->udp6_csum_tx && p->udp6_csum_rx
+			       ? "rx" : "",
+			       !p->udp6_csum_tx && !p->udp6_csum_rx
+			       ? "disabled" : "");
 			break;
 		}
 	}
-	close_json_object();
 }
 
 static void print_session(struct l2tp_data *data)
 {
 	struct l2tp_parm *p = &data->config;
 
-	open_json_object(NULL);
+	printf("Session %u in tunnel %u\n",
+	       p->session_id, p->tunnel_id);
+	printf("  Peer session %u, tunnel %u\n",
+	       p->peer_session_id, p->peer_tunnel_id);
 
-	print_uint(PRINT_ANY, "session_id", "Session %u", p->session_id);
-	print_uint(PRINT_ANY, "tunnel_id",  " in tunnel %u", p->tunnel_id);
-	print_nl();
+	if (p->ifname != NULL)
+		printf("  interface name: %s\n", p->ifname);
 
-	print_uint(PRINT_ANY, "peer_session_id",
-		     "  Peer session %u,", p->peer_session_id);
-	print_uint(PRINT_ANY, "peer_tunnel_id",
-		     " tunnel %u",  p->peer_tunnel_id);
-	print_nl();
-
-	if (p->ifname != NULL) {
-		print_color_string(PRINT_ANY, COLOR_IFNAME,
-				   "interface", "  interface name: %s" , p->ifname);
-		print_nl();
-	}
-
-	/* Show offsets only for plain console output (for legacy scripts) */
-	print_uint(PRINT_FP, "offset", "  offset %u,", 0);
-	print_uint(PRINT_FP, "peer_offset", " peer offset %u\n", 0);
-
+	printf("  offset %u, peer offset %u\n",
+	       p->offset, p->peer_offset);
 	if (p->cookie_len > 0)
-		print_cookie("cookie", "  cookie %s",
-			     p->cookie, p->cookie_len);
-
+		print_cookie("cookie", p->cookie, p->cookie_len);
 	if (p->peer_cookie_len > 0)
-		print_cookie("peer_cookie", "  peer cookie %s",
-			     p->peer_cookie, p->peer_cookie_len);
+		print_cookie("peer cookie", p->peer_cookie, p->peer_cookie_len);
 
 	if (p->reorder_timeout != 0)
-		print_uint(PRINT_ANY, "reorder_timeout",
-			   "  reorder timeout: %u", p->reorder_timeout);
-
-
+		printf("  reorder timeout: %u\n", p->reorder_timeout);
+	else
+		printf("\n");
 	if (p->send_seq || p->recv_seq) {
-		print_string(PRINT_FP, NULL, "%s  sequence numbering:", _SL_);
-
+		printf("  sequence numbering:");
 		if (p->send_seq)
-			print_null(PRINT_ANY, "send_seq", " send", NULL);
+			printf(" send");
 		if (p->recv_seq)
-			print_null(PRINT_ANY, "recv_seq", " recv", NULL);
-
+			printf(" recv");
+		printf("\n");
 	}
-	print_string(PRINT_FP, NULL, "\n", NULL);
-	close_json_object();
 }
 
 static int get_response(struct nlmsghdr *n, void *arg)
@@ -351,6 +314,10 @@ static int get_response(struct nlmsghdr *n, void *arg)
 		p->pw_type = rta_getattr_u16(attrs[L2TP_ATTR_PW_TYPE]);
 	if (attrs[L2TP_ATTR_ENCAP_TYPE])
 		p->encap = rta_getattr_u16(attrs[L2TP_ATTR_ENCAP_TYPE]);
+	if (attrs[L2TP_ATTR_OFFSET])
+		p->offset = rta_getattr_u16(attrs[L2TP_ATTR_OFFSET]);
+	if (attrs[L2TP_ATTR_DATA_SEQ])
+		p->data_seq = rta_getattr_u16(attrs[L2TP_ATTR_DATA_SEQ]);
 	if (attrs[L2TP_ATTR_CONN_ID])
 		p->tunnel_id = rta_getattr_u32(attrs[L2TP_ATTR_CONN_ID]);
 	if (attrs[L2TP_ATTR_PEER_CONN_ID])
@@ -408,6 +375,8 @@ static int get_response(struct nlmsghdr *n, void *arg)
 		p->local_udp_port = rta_getattr_u16(attrs[L2TP_ATTR_UDP_SPORT]);
 	if (attrs[L2TP_ATTR_UDP_DPORT])
 		p->peer_udp_port = rta_getattr_u16(attrs[L2TP_ATTR_UDP_DPORT]);
+	if (attrs[L2TP_ATTR_MTU])
+		p->mtu = rta_getattr_u16(attrs[L2TP_ATTR_MTU]);
 	if (attrs[L2TP_ATTR_IFNAME])
 		p->ifname = rta_getattr_str(attrs[L2TP_ATTR_IFNAME]);
 
@@ -438,7 +407,8 @@ static int get_response(struct nlmsghdr *n, void *arg)
 	return 0;
 }
 
-static int session_nlmsg(struct nlmsghdr *n, void *arg)
+static int session_nlmsg(const struct sockaddr_nl *who,
+			 struct nlmsghdr *n, void *arg)
 {
 	int ret = get_response(n, arg);
 
@@ -465,18 +435,16 @@ static int get_session(struct l2tp_data *p)
 	if (rtnl_send(&genl_rth, &req, req.n.nlmsg_len) < 0)
 		return -2;
 
-	new_json_obj(json);
 	if (rtnl_dump_filter(&genl_rth, session_nlmsg, p) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		exit(1);
 	}
-	delete_json_obj();
-	fflush(stdout);
 
 	return 0;
 }
 
-static int tunnel_nlmsg(struct nlmsghdr *n, void *arg)
+static int tunnel_nlmsg(const struct sockaddr_nl *who,
+			struct nlmsghdr *n, void *arg)
 {
 	int ret = get_response(n, arg);
 
@@ -500,13 +468,10 @@ static int get_tunnel(struct l2tp_data *p)
 	if (rtnl_send(&genl_rth, &req, req.n.nlmsg_len) < 0)
 		return -2;
 
-	new_json_obj(json);
 	if (rtnl_dump_filter(&genl_rth, tunnel_nlmsg, p) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		exit(1);
 	}
-	delete_json_obj();
-	fflush(stdout);
 
 	return 0;
 }
@@ -531,6 +496,7 @@ static void usage(void)
 		"          tunnel_id ID\n"
 		"          session_id ID peer_session_id ID\n"
 		"          [ cookie HEXSTR ] [ peer_cookie HEXSTR ]\n"
+		"          [ offset OFFSET ] [ peer_offset OFFSET ]\n"
 		"          [ seq { none | send | recv | both } ]\n"
 		"          [ l2spec_type L2SPEC ]\n"
 		"       ip l2tp del tunnel tunnel_id ID\n"
@@ -658,11 +624,19 @@ static int parse_args(int argc, char **argv, int cmd, struct l2tp_parm *p)
 				invarg("invalid option for udp6_csum_tx\n"
 						, *argv);
 		} else if (strcmp(*argv, "offset") == 0) {
-			fprintf(stderr, "Ignoring option \"offset\"\n");
+			__u8 uval;
+
 			NEXT_ARG();
+			if (get_u8(&uval, *argv, 0))
+				invarg("invalid offset\n", *argv);
+			p->offset = uval;
 		} else if (strcmp(*argv, "peer_offset") == 0) {
-			fprintf(stderr, "Ignoring option \"peer_offset\"\n");
+			__u8 uval;
+
 			NEXT_ARG();
+			if (get_u8(&uval, *argv, 0))
+				invarg("invalid offset\n", *argv);
+			p->peer_offset = uval;
 		} else if (strcmp(*argv, "cookie") == 0) {
 			int slen;
 

@@ -17,13 +17,12 @@
 
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage: ... hhf	[ limit PACKETS ] [ quantum BYTES]\n"
-		"		[ hh_limit NUMBER ]\n"
-		"		[ reset_timeout TIME ]\n"
-		"		[ admit_bytes BYTES ]\n"
-		"		[ evict_timeout TIME ]\n"
-		"		[ non_hh_weight NUMBER ]\n");
+	fprintf(stderr, "Usage: ... hhf [ limit PACKETS ] [ quantum BYTES]\n");
+	fprintf(stderr, "               [ hh_limit NUMBER ]\n");
+	fprintf(stderr, "               [ reset_timeout TIME ]\n");
+	fprintf(stderr, "               [ admit_bytes BYTES ]\n");
+	fprintf(stderr, "               [ evict_timeout TIME ]\n");
+	fprintf(stderr, "               [ non_hh_weight NUMBER ]\n");
 }
 
 static int hhf_parse_opt(struct qdisc_util *qu, int argc, char **argv,
@@ -92,7 +91,8 @@ static int hhf_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 		argc--; argv++;
 	}
 
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 	if (limit)
 		addattr_l(n, 1024, TCA_HHF_BACKLOG_LIMIT, &limit,
 			  sizeof(limit));
@@ -113,7 +113,7 @@ static int hhf_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 	if (non_hh_weight)
 		addattr_l(n, 1024, TCA_HHF_NON_HH_WEIGHT, &non_hh_weight,
 			  sizeof(non_hh_weight));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 

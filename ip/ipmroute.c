@@ -29,24 +29,21 @@
 #include <rt_names.h>
 #include "utils.h"
 #include "ip_common.h"
-#include "json_print.h"
 
 static void usage(void) __attribute__((noreturn));
 
 static void usage(void)
 {
-	fprintf(stderr,
-		"Usage: ip mroute show [ [ to ] PREFIX ] [ from PREFIX ] [ iif DEVICE ]\n"
-	"			[ table TABLE_ID ]\n"
-	"TABLE_ID := [ local | main | default | all | NUMBER ]\n"
+	fprintf(stderr, "Usage: ip mroute show [ [ to ] PREFIX ] [ from PREFIX ] [ iif DEVICE ]\n");
+	fprintf(stderr, "                      [ table TABLE_ID ]\n");
+	fprintf(stderr, "TABLE_ID := [ local | main | default | all | NUMBER ]\n");
 #if 0
-	"Usage: ip mroute [ add | del ] DESTINATION from SOURCE [ iif DEVICE ] [ oif DEVICE ]\n"
+	fprintf(stderr, "Usage: ip mroute [ add | del ] DESTINATION from SOURCE [ iif DEVICE ] [ oif DEVICE ]\n");
 #endif
-	);
 	exit(-1);
 }
 
-static struct rtfilter {
+struct rtfilter {
 	int tb;
 	int af;
 	int iif;
@@ -54,15 +51,15 @@ static struct rtfilter {
 	inet_prefix msrc;
 } filter;
 
-int print_mroute(struct nlmsghdr *n, void *arg)
+int print_mroute(const struct sockaddr_nl *who, struct nlmsghdr *n, void *arg)
 {
+	FILE *fp = (FILE *)arg;
 	struct rtmsg *r = NLMSG_DATA(n);
 	int len = n->nlmsg_len;
 	struct rtattr *tb[RTA_MAX+1];
-	FILE *fp = arg;
-	const char *src, *dst;
+	char obuf[256];
+
 	SPRINT_BUF(b1);
-	SPRINT_BUF(b2);
 	__u32 table;
 	int iif = 0;
 	int family;
@@ -78,11 +75,10 @@ int print_mroute(struct nlmsghdr *n, void *arg)
 		fprintf(stderr, "BUG: wrong nlmsg len %d\n", len);
 		return -1;
 	}
-
 	if (r->rtm_type != RTN_MULTICAST) {
-		fprintf(stderr,
-			"Non multicast route received, kernel does support IP multicast?\n");
-		return -1;
+		fprintf(stderr, "Not a multicast route (type: %s)\n",
+			rtnl_rtntype_n2a(r->rtm_type, b1, sizeof(b1)));
+		return 0;
 	}
 
 	parse_rtattr(tb, RTA_MAX, RTM_RTA(r), len);
@@ -107,44 +103,30 @@ int print_mroute(struct nlmsghdr *n, void *arg)
 
 	family = get_real_family(r->rtm_type, r->rtm_family);
 
-	open_json_object(NULL);
 	if (n->nlmsg_type == RTM_DELROUTE)
-		print_bool(PRINT_ANY, "deleted", "Deleted ", true);
+		fprintf(fp, "Deleted ");
 
 	if (tb[RTA_SRC])
-		src = rt_addr_n2a_r(family, RTA_PAYLOAD(tb[RTA_SRC]),
-				    RTA_DATA(tb[RTA_SRC]), b1, sizeof(b1));
+		len = snprintf(obuf, sizeof(obuf),
+			       "(%s, ", rt_addr_n2a_rta(family, tb[RTA_SRC]));
 	else
-		src = "unknown";
-
+		len = sprintf(obuf, "(unknown, ");
 	if (tb[RTA_DST])
-		dst = rt_addr_n2a_r(family, RTA_PAYLOAD(tb[RTA_DST]),
-				    RTA_DATA(tb[RTA_DST]), b2, sizeof(b2));
+		snprintf(obuf + len, sizeof(obuf) - len,
+			 "%s)", rt_addr_n2a_rta(family, tb[RTA_DST]));
 	else
-		dst = "unknown";
+		snprintf(obuf + len, sizeof(obuf) - len, "unknown) ");
 
-	if (is_json_context()) {
-		print_string(PRINT_JSON, "src", NULL, src);
-		print_string(PRINT_JSON, "dst", NULL, dst);
-	} else {
-		char obuf[256];
-
-		snprintf(obuf, sizeof(obuf), "(%s,%s)", src, dst);
-		print_string(PRINT_FP, NULL,
-			     "%-32s Iif: ", obuf);
-	}
-
+	fprintf(fp, "%-32s Iif: ", obuf);
 	if (iif)
-		print_color_string(PRINT_ANY, COLOR_IFNAME,
-				   "iif", "%-10s ", ll_index_to_name(iif));
+		fprintf(fp, "%-10s ", ll_index_to_name(iif));
 	else
-		print_string(PRINT_ANY,"iif", "%s ", "unresolved");
+		fprintf(fp, "unresolved ");
 
 	if (tb[RTA_MULTIPATH]) {
 		struct rtnexthop *nh = RTA_DATA(tb[RTA_MULTIPATH]);
 		int first = 1;
 
-		open_json_array(PRINT_JSON, "multipath");
 		len = RTA_PAYLOAD(tb[RTA_MULTIPATH]);
 
 		for (;;) {
@@ -153,65 +135,46 @@ int print_mroute(struct nlmsghdr *n, void *arg)
 			if (nh->rtnh_len > len)
 				break;
 
-			open_json_object(NULL);
 			if (first) {
-				print_string(PRINT_FP, NULL, "Oifs: ", NULL);
+				fprintf(fp, "Oifs: ");
 				first = 0;
 			}
-
-			print_color_string(PRINT_ANY, COLOR_IFNAME,
-					   "oif", "%s", ll_index_to_name(nh->rtnh_ifindex));
-
+			fprintf(fp, "%s", ll_index_to_name(nh->rtnh_ifindex));
 			if (nh->rtnh_hops > 1)
-				print_uint(PRINT_ANY,
-					   "ttl", "(ttl %u) ", nh->rtnh_hops);
+				fprintf(fp, "(ttl %d) ", nh->rtnh_hops);
 			else
-				print_string(PRINT_FP, NULL, " ", NULL);
-
-			close_json_object();
+				fprintf(fp, " ");
 			len -= NLMSG_ALIGN(nh->rtnh_len);
 			nh = RTNH_NEXT(nh);
 		}
-		close_json_array(PRINT_JSON, NULL);
 	}
-
-	print_string(PRINT_ANY, "state", " State: %s",
-		     (r->rtm_flags & RTNH_F_UNRESOLVED) ? "unresolved" : "resolved");
-
+	fprintf(fp, " State: %s",
+		r->rtm_flags & RTNH_F_UNRESOLVED ? "unresolved" : "resolved");
 	if (r->rtm_flags & RTNH_F_OFFLOAD)
-		print_null(PRINT_ANY, "offload", " offload", NULL);
-
+		fprintf(fp, " offload");
 	if (show_stats && tb[RTA_MFC_STATS]) {
 		struct rta_mfc_stats *mfcs = RTA_DATA(tb[RTA_MFC_STATS]);
 
-		print_nl();
-		print_u64(PRINT_ANY, "packets", "  %"PRIu64" packets,",
-			   mfcs->mfcs_packets);
-		print_u64(PRINT_ANY, "bytes", " %"PRIu64" bytes", mfcs->mfcs_bytes);
-
+		fprintf(fp, "%s  %"PRIu64" packets, %"PRIu64" bytes", _SL_,
+			(uint64_t)mfcs->mfcs_packets,
+			(uint64_t)mfcs->mfcs_bytes);
 		if (mfcs->mfcs_wrong_if)
-			print_u64(PRINT_ANY, "wrong_if",
-				   ", %"PRIu64" arrived on wrong iif.",
-				   mfcs->mfcs_wrong_if);
+			fprintf(fp, ", %"PRIu64" arrived on wrong iif.",
+				(uint64_t)mfcs->mfcs_wrong_if);
 	}
-
 	if (show_stats && tb[RTA_EXPIRES]) {
 		struct timeval tv;
-		double age;
 
 		__jiffies_to_tv(&tv, rta_getattr_u64(tb[RTA_EXPIRES]));
-		age = tv.tv_sec;
-		age += tv.tv_usec / 1000000.;
-		print_float(PRINT_ANY, "expires",
-			    ", Age %.2f", age);
+		fprintf(fp, ", Age %4i.%.2i", (int)tv.tv_sec,
+			(int)tv.tv_usec/10000);
 	}
 
 	if (table && (table != RT_TABLE_MAIN || show_details > 0) && !filter.tb)
-		print_string(PRINT_ANY, "table", " Table: %s",
-			     rtnl_rttable_n2a(table, b1, sizeof(b1)));
+		fprintf(fp, " Table: %s",
+			rtnl_rttable_n2a(table, b1, sizeof(b1)));
 
-	print_string(PRINT_FP, NULL, "\n", NULL);
-	close_json_object();
+	fprintf(fp, "\n");
 	fflush(fp);
 	return 0;
 }
@@ -224,36 +187,21 @@ void ipmroute_reset_filter(int ifindex)
 	filter.iif = ifindex;
 }
 
-static int iproute_dump_filter(struct nlmsghdr *nlh, int reqlen)
-{
-	int err;
-
-	if (filter.tb) {
-		err = addattr32(nlh, reqlen, RTA_TABLE, filter.tb);
-		if (err)
-			return err;
-	}
-
-	return 0;
-}
-
 static int mroute_list(int argc, char **argv)
 {
 	char *id = NULL;
-	int family = preferred_family;
+	int family;
 
 	ipmroute_reset_filter(0);
-	if (family == AF_INET || family == AF_UNSPEC) {
-		family = RTNL_FAMILY_IPMR;
+	if (preferred_family == AF_UNSPEC)
+		family = AF_INET;
+	else
+		family = AF_INET6;
+	if (family == AF_INET) {
 		filter.af = RTNL_FAMILY_IPMR;
 		filter.tb = RT_TABLE_DEFAULT;  /* for backward compatibility */
-	} else if (family == AF_INET6) {
-		family = RTNL_FAMILY_IP6MR;
+	} else
 		filter.af = RTNL_FAMILY_IP6MR;
-	} else {
-		/* family does not have multicast routing */
-		return 0;
-	}
 
 	filter.msrc.family = filter.mdst.family = family;
 
@@ -296,26 +244,24 @@ static int mroute_list(int argc, char **argv)
 	if (id)  {
 		int idx;
 
-		idx = ll_name_to_index(id);
-		if (!idx)
-			return nodev(id);
+		if ((idx = ll_name_to_index(id)) == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", id);
+			return -1;
+		}
 		filter.iif = idx;
 	}
 
-	if (rtnl_routedump_req(&rth, filter.af, iproute_dump_filter) < 0) {
+	if (rtnl_wilddump_request(&rth, filter.af, RTM_GETROUTE) < 0) {
 		perror("Cannot send dump request");
 		return 1;
 	}
 
-	new_json_obj(json);
 	if (rtnl_dump_filter(&rth, print_mroute, stdout) < 0) {
-		delete_json_obj();
 		fprintf(stderr, "Dump terminated\n");
 		exit(1);
 	}
-	delete_json_obj();
 
-	return 0;
+	exit(0);
 }
 
 int do_multiroute(int argc, char **argv)

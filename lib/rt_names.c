@@ -27,8 +27,6 @@
 
 #define NAME_MAX_LEN 512
 
-int numeric;
-
 struct rtnl_hash_entry {
 	struct rtnl_hash_entry	*next;
 	const char		*name;
@@ -136,11 +134,6 @@ static char *rtnl_rtprot_tab[256] = {
 	[RTPROT_XORP]	  = "xorp",
 	[RTPROT_NTK]	  = "ntk",
 	[RTPROT_DHCP]	  = "dhcp",
-	[RTPROT_BGP]	  = "bgp",
-	[RTPROT_ISIS]	  = "isis",
-	[RTPROT_OSPF]	  = "ospf",
-	[RTPROT_RIP]	  = "rip",
-	[RTPROT_EIGRP]	  = "eigrp",
 };
 
 
@@ -182,7 +175,7 @@ static void rtnl_rtprot_initialize(void)
 
 const char *rtnl_rtprot_n2a(int id, char *buf, int len)
 {
-	if (id < 0 || id >= 256 || numeric) {
+	if (id < 0 || id >= 256) {
 		snprintf(buf, len, "%u", id);
 		return buf;
 	}
@@ -248,7 +241,7 @@ static void rtnl_rtscope_initialize(void)
 
 const char *rtnl_rtscope_n2a(int id, char *buf, int len)
 {
-	if (id < 0 || id >= 256 || numeric) {
+	if (id < 0 || id >= 256) {
 		snprintf(buf, len, "%d", id);
 		return buf;
 	}
@@ -313,7 +306,7 @@ static void rtnl_rtrealm_initialize(void)
 
 const char *rtnl_rtrealm_n2a(int id, char *buf, int len)
 {
-	if (id < 0 || id >= 256 || numeric) {
+	if (id < 0 || id >= 256) {
 		snprintf(buf, len, "%d", id);
 		return buf;
 	}
@@ -421,7 +414,7 @@ const char *rtnl_rttable_n2a(__u32 id, char *buf, int len)
 	entry = rtnl_rttable_hash[id & 255];
 	while (entry && entry->id != id)
 		entry = entry->next;
-	if (!numeric && entry)
+	if (entry)
 		return entry->name;
 	snprintf(buf, len, "%u", id);
 	return buf;
@@ -486,7 +479,7 @@ const char *rtnl_dsfield_n2a(int id, char *buf, int len)
 		if (!rtnl_rtdsfield_init)
 			rtnl_rtdsfield_initialize();
 	}
-	if (!numeric && rtnl_rtdsfield_tab[id])
+	if (rtnl_rtdsfield_tab[id])
 		return rtnl_rtdsfield_tab[id];
 	snprintf(buf, len, "0x%02x", id);
 	return buf;
@@ -586,7 +579,7 @@ const char *rtnl_group_n2a(int id, char *buf, int len)
 	if (!rtnl_group_init)
 		rtnl_group_initialize();
 
-	for (i = 0; !numeric && i < 256; i++) {
+	for (i = 0; i < 256; i++) {
 		entry = rtnl_group_hash[i];
 
 		while (entry) {
@@ -635,8 +628,8 @@ static void nl_proto_initialize(void)
 
 const char *nl_proto_n2a(int id, char *buf, int len)
 {
-	if (id < 0 || id >= 256 || numeric) {
-		snprintf(buf, len, "%d", id);
+	if (id < 0 || id >= 256) {
+		snprintf(buf, len, "%u", id);
 		return buf;
 	}
 

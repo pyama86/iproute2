@@ -23,16 +23,15 @@
 #include "utils.h"
 #include "ip_common.h"
 #include "ila_common.h"
-#include "json_print.h"
 
 static void usage(void)
 {
 	fprintf(stderr,
-		"Usage: ip ila add loc_match LOCATOR_MATCH loc LOCATOR [ dev DEV ] OPTIONS\n"
-		"       ip ila del loc_match LOCATOR_MATCH [ loc LOCATOR ] [ dev DEV ]\n"
-		"       ip ila list\n"
-		"OPTIONS := [ csum-mode { adj-transport | neutral-map | neutral-map-auto | no-action } ]\n"
-		"           [ ident-type { luid | use-format } ]\n");
+"Usage: ip ila add loc_match LOCATOR_MATCH loc LOCATOR [ dev DEV ] OPTIONS\n"
+"       ip ila del loc_match LOCATOR_MATCH [ loc LOCATOR ] [ dev DEV ]\n"
+"       ip ila list\n"
+"OPTIONS := [ csum-mode { adj-transport | neutral-map | neutral-map-auto | no-action } ]\n"
+"           [ ident-type { luid | use-format } ]\n");
 
 	exit(-1);
 }
@@ -48,7 +47,9 @@ static int genl_family = -1;
 #define ILA_RTA(g) ((struct rtattr *)(((char *)(g)) +	\
 	NLMSG_ALIGN(sizeof(struct genlmsghdr))))
 
-static void print_addr64(__u64 addr, char *buff, size_t len)
+#define ADDR_BUF_SIZE sizeof("xxxx:xxxx:xxxx:xxxx")
+
+static int print_addr64(__u64 addr, char *buff, size_t len)
 {
 	__u16 *words = (__u16 *)&addr;
 	__u16 v;
@@ -63,26 +64,38 @@ static void print_addr64(__u64 addr, char *buff, size_t len)
 			sep = "";
 
 		ret = snprintf(&buff[written], len - written, "%x%s", v, sep);
+		if (ret < 0)
+			return ret;
+
 		written += ret;
 	}
+
+	return written;
 }
 
-static void print_ila_locid(const char *tag, int attr, struct rtattr *tb[])
+static void print_ila_locid(FILE *fp, int attr, struct rtattr *tb[], int space)
 {
 	char abuf[256];
+	size_t blen;
+	int i;
 
-	if (tb[attr])
-		print_addr64(rta_getattr_u64(tb[attr]),
-			     abuf, sizeof(abuf));
-	else
-		snprintf(abuf, sizeof(abuf), "-");
+	if (tb[attr]) {
+		blen = print_addr64(rta_getattr_u64(tb[attr]),
+				    abuf, sizeof(abuf));
+		fprintf(fp, "%s", abuf);
+	} else {
+		fprintf(fp, "-");
+		blen = 1;
+	}
 
-	/* 20 = sizeof("xxxx:xxxx:xxxx:xxxx") */
-	print_string(PRINT_ANY, tag, "%-20s", abuf);
+	for (i = 0; i < space - blen; i++)
+		fprintf(fp, " ");
 }
 
-static int print_ila_mapping(struct nlmsghdr *n, void *arg)
+static int print_ila_mapping(const struct sockaddr_nl *who,
+			     struct nlmsghdr *n, void *arg)
 {
+	FILE *fp = (FILE *)arg;
 	struct genlmsghdr *ghdr;
 	struct rtattr *tb[ILA_ATTR_MAX + 1];
 	int len = n->nlmsg_len;
@@ -97,38 +110,31 @@ static int print_ila_mapping(struct nlmsghdr *n, void *arg)
 	ghdr = NLMSG_DATA(n);
 	parse_rtattr(tb, ILA_ATTR_MAX, (void *) ghdr + GENL_HDRLEN, len);
 
-	open_json_object(NULL);
-	print_ila_locid("locator_match", ILA_ATTR_LOCATOR_MATCH, tb);
-	print_ila_locid("locator", ILA_ATTR_LOCATOR, tb);
+	print_ila_locid(fp, ILA_ATTR_LOCATOR_MATCH, tb, ADDR_BUF_SIZE);
+	print_ila_locid(fp, ILA_ATTR_LOCATOR, tb, ADDR_BUF_SIZE);
 
-	if (tb[ILA_ATTR_IFINDEX]) {
-		__u32 ifindex
-			= rta_getattr_u32(tb[ILA_ATTR_IFINDEX]);
+	if (tb[ILA_ATTR_IFINDEX])
+		fprintf(fp, "%-16s",
+			ll_index_to_name(rta_getattr_u32(
+						tb[ILA_ATTR_IFINDEX])));
+	else
+		fprintf(fp, "%-10s ", "-");
 
-		print_color_string(PRINT_ANY, COLOR_IFNAME,
-				   "interface", "%-16s",
-				   ll_index_to_name(ifindex));
-	} else {
-		print_string(PRINT_FP, NULL, "%-10s ", "-");
-	}
-
-	if (tb[ILA_ATTR_CSUM_MODE]) {
-		__u8 csum = rta_getattr_u8(tb[ILA_ATTR_CSUM_MODE]);
-
-		print_string(PRINT_ANY, "csum_mode", "%s",
-			     ila_csum_mode2name(csum));
-	} else
-		print_string(PRINT_FP, NULL, "%-10s ", "-");
+	if (tb[ILA_ATTR_CSUM_MODE])
+		fprintf(fp, "%s",
+			ila_csum_mode2name(rta_getattr_u8(
+						tb[ILA_ATTR_CSUM_MODE])));
+	else
+		fprintf(fp, "%-10s ", "-");
 
 	if (tb[ILA_ATTR_IDENT_TYPE])
-		print_string(PRINT_ANY, "ident_type", "%s",
+		fprintf(fp, "%s",
 			ila_ident_type2name(rta_getattr_u8(
 						tb[ILA_ATTR_IDENT_TYPE])));
 	else
-		print_string(PRINT_FP, NULL, "%s", "-");
+		fprintf(fp, "-");
 
-	print_nl();
-	close_json_object();
+	fprintf(fp, "\n");
 
 	return 0;
 }
@@ -150,13 +156,10 @@ static int do_list(int argc, char **argv)
 		exit(1);
 	}
 
-	new_json_obj(json);
 	if (rtnl_dump_filter(&genl_rth, print_ila_mapping, stdout) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		return 1;
 	}
-	delete_json_obj();
-	fflush(stdout);
 
 	return 0;
 }

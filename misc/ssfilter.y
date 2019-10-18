@@ -42,18 +42,24 @@ static void yyerror(char *s)
 %nonassoc '!'
 
 %%
-applet: exprlist
+applet: null exprlist
         {
-                *yy_ret = $1;
-                $$ = $1;
+                *yy_ret = $2;
+                $$ = $2;
         }
         | null
         ;
-
 null:   /* NOTHING */ { $$ = NULL; }
         ;
-
 exprlist: expr
+        | '!' expr
+        {
+                $$ = alloc_node(SSF_NOT, $2);
+        }
+        | '(' exprlist ')'
+        {
+                $$ = $2;
+        }
         | exprlist '|' expr
         {
                 $$ = alloc_node(SSF_OR, $1);
@@ -71,25 +77,13 @@ exprlist: expr
         }
         ;
 
-eq:	'='
-	| /* nothing */
-	;
-
-expr:	'(' exprlist ')'
-	{
-		$$ = $2;
-	}
-	| '!' expr
-	{
-		$$ = alloc_node(SSF_NOT, $2);
-	}
-	| DCOND eq HOSTCOND
+expr:	DCOND HOSTCOND
         {
-		$$ = alloc_node(SSF_DCOND, $3);
+		$$ = alloc_node(SSF_DCOND, $2);
         }
-        | SCOND eq HOSTCOND
+        | SCOND HOSTCOND
         {
-		$$ = alloc_node(SSF_SCOND, $3);
+		$$ = alloc_node(SSF_SCOND, $2);
         }
         | DPORT GEQ HOSTCOND
         {
@@ -107,7 +101,7 @@ expr:	'(' exprlist ')'
         {
                 $$ = alloc_node(SSF_NOT, alloc_node(SSF_D_GE, $3));
         }
-        | DPORT eq HOSTCOND
+        | DPORT '=' HOSTCOND
         {
 		$$ = alloc_node(SSF_DCOND, $3);
         }
@@ -132,7 +126,7 @@ expr:	'(' exprlist ')'
         {
                 $$ = alloc_node(SSF_NOT, alloc_node(SSF_S_GE, $3));
         }
-        | SPORT eq HOSTCOND
+        | SPORT '=' HOSTCOND
         {
 		$$ = alloc_node(SSF_SCOND, $3);
         }
@@ -140,7 +134,7 @@ expr:	'(' exprlist ')'
         {
 		$$ = alloc_node(SSF_NOT, alloc_node(SSF_SCOND, $3));
         }
-        | DEVNAME eq DEVCOND
+        | DEVNAME '=' DEVCOND
         {
 		$$ = alloc_node(SSF_DEVCOND, $3);
         }
@@ -148,7 +142,7 @@ expr:	'(' exprlist ')'
         {
 		$$ = alloc_node(SSF_NOT, alloc_node(SSF_DEVCOND, $3));
         }
-        | FWMARK eq MARKMASK
+        | FWMARK '=' MARKMASK
         {
                 $$ = alloc_node(SSF_MARKMASK, $3);
         }

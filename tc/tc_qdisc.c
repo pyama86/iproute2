@@ -27,19 +27,18 @@
 
 static int usage(void)
 {
-	fprintf(stderr,
-		"Usage: tc qdisc [ add | del | replace | change | show ] dev STRING\n"
-		"       [ handle QHANDLE ] [ root | ingress | clsact | parent CLASSID ]\n"
-		"       [ estimator INTERVAL TIME_CONSTANT ]\n"
-		"       [ stab [ help | STAB_OPTIONS] ]\n"
-		"       [ ingress_block BLOCK_INDEX ] [ egress_block BLOCK_INDEX ]\n"
-		"       [ [ QDISC_KIND ] [ help | OPTIONS ] ]\n"
-		"\n"
-		"       tc qdisc show [ dev STRING ] [ ingress | clsact ] [ invisible ]\n"
-		"Where:\n"
-		"QDISC_KIND := { [p|b]fifo | tbf | prio | cbq | red | etc. }\n"
-		"OPTIONS := ... try tc qdisc add <desired QDISC_KIND> help\n"
-		"STAB_OPTIONS := ... try tc qdisc add stab help\n");
+	fprintf(stderr, "Usage: tc qdisc [ add | del | replace | change | show ] dev STRING\n");
+	fprintf(stderr, "       [ handle QHANDLE ] [ root | ingress | clsact | parent CLASSID ]\n");
+	fprintf(stderr, "       [ estimator INTERVAL TIME_CONSTANT ]\n");
+	fprintf(stderr, "       [ stab [ help | STAB_OPTIONS] ]\n");
+	fprintf(stderr, "       [ ingress_block BLOCK_INDEX ] [ egress_block BLOCK_INDEX ]\n");
+	fprintf(stderr, "       [ [ QDISC_KIND ] [ help | OPTIONS ] ]\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "       tc qdisc show [ dev STRING ] [ ingress | clsact ] [ invisible ]\n");
+	fprintf(stderr, "Where:\n");
+	fprintf(stderr, "QDISC_KIND := { [p|b]fifo | tbf | prio | cbq | red | etc. }\n");
+	fprintf(stderr, "OPTIONS := ... try tc qdisc add <desired QDISC_KIND> help\n");
+	fprintf(stderr, "STAB_OPTIONS := ... try tc qdisc add stab help\n");
 	return -1;
 }
 
@@ -183,13 +182,14 @@ static int tc_qdisc_modify(int cmd, unsigned int flags, int argc, char **argv)
 			return -1;
 		}
 
-		tail = addattr_nest(&req.n, sizeof(req), TCA_STAB);
+		tail = NLMSG_TAIL(&req.n);
+		addattr_l(&req.n, sizeof(req), TCA_STAB, NULL, 0);
 		addattr_l(&req.n, sizeof(req), TCA_STAB_BASE, &stab.szopts,
 			  sizeof(stab.szopts));
 		if (stab.data)
 			addattr_l(&req.n, sizeof(req), TCA_STAB_DATA, stab.data,
 				  stab.szopts.tsize * sizeof(__u16));
-		addattr_nest_end(&req.n, tail);
+		tail->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)tail;
 		if (stab.data)
 			free(stab.data);
 	}
@@ -200,8 +200,10 @@ static int tc_qdisc_modify(int cmd, unsigned int flags, int argc, char **argv)
 		ll_init_map(&rth);
 
 		idx = ll_name_to_index(d);
-		if (!idx)
-			return -nodev(d);
+		if (idx == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", d);
+			return 1;
+		}
 		req.t.tcm_ifindex = idx;
 	}
 
@@ -213,7 +215,8 @@ static int tc_qdisc_modify(int cmd, unsigned int flags, int argc, char **argv)
 
 static int filter_ifindex;
 
-int print_qdisc(struct nlmsghdr *n, void *arg)
+int print_qdisc(const struct sockaddr_nl *who,
+		struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
 	struct tcmsg *t = NLMSG_DATA(n);
@@ -268,7 +271,8 @@ int print_qdisc(struct nlmsghdr *n, void *arg)
 	print_string(PRINT_FP, NULL, " ", NULL);
 
 	if (filter_ifindex == 0)
-		print_devname(PRINT_ANY, t->tcm_ifindex);
+		print_string(PRINT_ANY, "dev", "dev %s ",
+			     ll_index_to_name(t->tcm_ifindex));
 
 	if (t->tcm_parent == TC_H_ROOT)
 		print_bool(PRINT_ANY, "root", "root ", true);
@@ -313,7 +317,8 @@ int print_qdisc(struct nlmsghdr *n, void *arg)
 		if (q)
 			q->print_qopt(q, fp, tb[TCA_OPTIONS]);
 		else
-			fprintf(stderr, "Cannot parse qdisc parameters\n");
+			print_string(PRINT_FP, NULL,
+				     "[cannot parse qdisc parameters]", NULL);
 	}
 	close_json_object();
 
@@ -375,8 +380,10 @@ static int tc_qdisc_list(int argc, char **argv)
 
 	if (d[0]) {
 		t.tcm_ifindex = ll_name_to_index(d);
-		if (!t.tcm_ifindex)
-			return -nodev(d);
+		if (t.tcm_ifindex == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", d);
+			return 1;
+		}
 		filter_ifindex = t.tcm_ifindex;
 	}
 
@@ -447,7 +454,8 @@ struct tc_qdisc_block_exists_ctx {
 	bool found;
 };
 
-static int tc_qdisc_block_exists_cb(struct nlmsghdr *n, void *arg)
+static int tc_qdisc_block_exists_cb(const struct sockaddr_nl *who,
+				    struct nlmsghdr *n, void *arg)
 {
 	struct tc_qdisc_block_exists_ctx *ctx = arg;
 	struct tcmsg *t = NLMSG_DATA(n);

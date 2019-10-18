@@ -299,8 +299,9 @@ static int parse_ipt(struct action_util *a, int *argc_p,
 		int i;
 
 		for (i = 0; i < rargc; i++) {
-			if (!argv[i] || strcmp(argv[i], "action") == 0)
+			if (NULL == argv[i] || 0 == strcmp(argv[i], "action")) {
 				break;
+			}
 		}
 		iargc = argc = i;
 	}
@@ -382,7 +383,8 @@ static int parse_ipt(struct action_util *a, int *argc_p,
 		}
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	fprintf(stdout, "tablename: %s hook: %s\n ", tname, ipthooks[hook]);
 	fprintf(stdout, "\ttarget: ");
 
@@ -403,7 +405,7 @@ static int parse_ipt(struct action_util *a, int *argc_p,
 	addattr_l(n, MAX_MSG, TCA_IPT_INDEX, &index, 4);
 	if (m)
 		addattr_l(n, MAX_MSG, TCA_IPT_TARG, m->t, m->t->u.target_size);
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 
 	argc -= optind;
 	argv += optind;
@@ -429,8 +431,6 @@ print_ipt(struct action_util *au, FILE * f, struct rtattr *arg)
 {
 	struct rtattr *tb[TCA_IPT_MAX + 1];
 	struct ipt_entry_target *t = NULL;
-	struct xtables_target *m;
-	__u32 hook;
 
 	if (arg == NULL)
 		return -1;
@@ -442,68 +442,70 @@ print_ipt(struct action_util *au, FILE * f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_IPT_MAX, arg);
 
 	if (tb[TCA_IPT_TABLE] == NULL) {
-		fprintf(stderr,  "Missing ipt table name, assuming mangle\n");
+		fprintf(f, "[NULL ipt table name ] assuming mangle ");
 	} else {
 		fprintf(f, "tablename: %s ",
 			rta_getattr_str(tb[TCA_IPT_TABLE]));
 	}
 
 	if (tb[TCA_IPT_HOOK] == NULL) {
-		fprintf(stderr, "Missing ipt hook name\n ");
+		fprintf(f, "[NULL ipt hook name ]\n ");
 		return -1;
-	}
+	} else {
+		__u32 hook;
 
-	hook = rta_getattr_u32(tb[TCA_IPT_HOOK]);
-	fprintf(f, " hook: %s\n", ipthooks[hook]);
+		hook = rta_getattr_u32(tb[TCA_IPT_HOOK]);
+		fprintf(f, " hook: %s\n", ipthooks[hook]);
+	}
 
 	if (tb[TCA_IPT_TARG] == NULL) {
-		fprintf(stderr, "Missing ipt target parameters\n");
+		fprintf(f, "\t[NULL ipt target parameters ]\n");
 		return -1;
-	}
+	} else {
+		struct xtables_target *m = NULL;
 
+		t = RTA_DATA(tb[TCA_IPT_TARG]);
+		m = get_target_name(t->u.user.name);
+		if (m != NULL) {
+			if (build_st(m, t) < 0) {
+				fprintf(stderr, " %s error\n", m->name);
+				return -1;
+			}
 
-	t = RTA_DATA(tb[TCA_IPT_TARG]);
-	m = get_target_name(t->u.user.name);
-	if (m != NULL) {
-		if (build_st(m, t) < 0) {
-			fprintf(stderr, " %s error\n", m->name);
+			opts =
+			    merge_options(opts, m->extra_opts,
+					  &m->option_offset);
+		} else {
+			fprintf(stderr, " failed to find target %s\n\n",
+				t->u.user.name);
 			return -1;
 		}
+		fprintf(f, "\ttarget ");
+		m->print(NULL, m->t, 0);
+		if (tb[TCA_IPT_INDEX] == NULL) {
+			fprintf(f, " [NULL ipt target index ]\n");
+		} else {
+			__u32 index;
 
-		opts =
-			merge_options(opts, m->extra_opts,
-				      &m->option_offset);
-	} else {
-		fprintf(stderr, " failed to find target %s\n\n",
-			t->u.user.name);
-		return -1;
-	}
-
-	fprintf(f, "\ttarget ");
-	m->print(NULL, m->t, 0);
-	if (tb[TCA_IPT_INDEX] == NULL) {
-		fprintf(stderr, "Missing ipt target index\n");
-	} else {
-		__u32 index;
-
-		index = rta_getattr_u32(tb[TCA_IPT_INDEX]);
-		fprintf(f, "\n\tindex %u", index);
-	}
-
-	if (tb[TCA_IPT_CNT]) {
-		struct tc_cnt *c  = RTA_DATA(tb[TCA_IPT_CNT]);
-
-		fprintf(f, " ref %d bind %d", c->refcnt, c->bindcnt);
-	}
-	if (show_stats) {
-		if (tb[TCA_IPT_TM]) {
-			struct tcf_t *tm = RTA_DATA(tb[TCA_IPT_TM]);
-
-			print_tm(f, tm);
+			index = rta_getattr_u32(tb[TCA_IPT_INDEX]);
+			fprintf(f, "\n\tindex %u", index);
 		}
-	}
-	fprintf(f, "\n");
 
+		if (tb[TCA_IPT_CNT]) {
+			struct tc_cnt *c  = RTA_DATA(tb[TCA_IPT_CNT]);
+
+			fprintf(f, " ref %d bind %d", c->refcnt, c->bindcnt);
+		}
+		if (show_stats) {
+			if (tb[TCA_IPT_TM]) {
+				struct tcf_t *tm = RTA_DATA(tb[TCA_IPT_TM]);
+
+				print_tm(f, tm);
+			}
+		}
+		fprintf(f, "\n");
+
+	}
 	free_opts(opts);
 
 	return 0;

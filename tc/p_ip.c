@@ -51,7 +51,7 @@ parse_ip(int *argc_p, char ***argv_p,
 	}
 	/* jamal - look at these and make them either old or new
 	** scheme given diffserv
-	** don't forget the CE bit
+	** dont forget the CE bit
 	*/
 	if (strcmp(*argv, "tos") == 0 || matches(*argv, "dsfield") == 0) {
 		NEXT_ARG();
@@ -156,6 +156,7 @@ done:
 }
 
 struct m_pedit_util p_pedit_ip = {
-	.id = "ip",
-	.parse_peopt = parse_ip,
+	NULL,
+	"ip",
+	parse_ip,
 };

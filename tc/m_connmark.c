@@ -27,9 +27,8 @@
 static void
 explain(void)
 {
-	fprintf(stderr,
-		"Usage: ... connmark [zone ZONE] [CONTROL] [index <INDEX>]\n"
-		"where :\n"
+	fprintf(stderr, "Usage: ... connmark [zone ZONE] [CONTROL] [index <INDEX>]\n");
+	fprintf(stderr, "where :\n"
 		"\tZONE is the conntrack zone\n"
 		"\tCONTROL := reclassify | pipe | drop | continue | ok |\n"
 		"\t           goto chain <CHAIN_INDEX>\n");
@@ -74,7 +73,7 @@ parse_connmark(struct action_util *a, int *argc_p, char ***argv_p, int tca_id,
 		if (matches(*argv, "zone") == 0) {
 			NEXT_ARG();
 			if (get_u16(&sel.zone, *argv, 10)) {
-				fprintf(stderr, "connmark: Illegal \"zone\"\n");
+				fprintf(stderr, "simple: Illegal \"index\"\n");
 				return -1;
 			}
 			argc--;
@@ -88,7 +87,7 @@ parse_connmark(struct action_util *a, int *argc_p, char ***argv_p, int tca_id,
 		if (matches(*argv, "index") == 0) {
 			NEXT_ARG();
 			if (get_u32(&sel.index, *argv, 10)) {
-				fprintf(stderr, "connmark: Illegal \"index\"\n");
+				fprintf(stderr, "simple: Illegal \"index\"\n");
 				return -1;
 			}
 			argc--;
@@ -96,9 +95,10 @@ parse_connmark(struct action_util *a, int *argc_p, char ***argv_p, int tca_id,
 		}
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_CONNMARK_PARMS, &sel, sizeof(sel));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (char *)NLMSG_TAIL(n) - (char *)tail;
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -115,20 +115,16 @@ static int print_connmark(struct action_util *au, FILE *f, struct rtattr *arg)
 
 	parse_rtattr_nested(tb, TCA_CONNMARK_MAX, arg);
 	if (tb[TCA_CONNMARK_PARMS] == NULL) {
-		fprintf(stderr, "Missing connmark parameters\n");
+		fprintf(f, "[NULL connmark parameters]");
 		return -1;
 	}
 
 	ci = RTA_DATA(tb[TCA_CONNMARK_PARMS]);
 
-	print_string(PRINT_ANY, "kind", "%s ", "connmark");
-	print_uint(PRINT_ANY, "zone", "zone %u", ci->zone);
-	print_action_control(f, " ", ci->action, "");
-
-	print_string(PRINT_FP, NULL, "%s", _SL_);
-	print_uint(PRINT_ANY, "index", "\t index %u", ci->index);
-	print_int(PRINT_ANY, "ref", " ref %d", ci->refcnt);
-	print_int(PRINT_ANY, "bind", " bind %d", ci->bindcnt);
+	fprintf(f, " connmark zone %d", ci->zone);
+	print_action_control(f, " ", ci->action, "\n");
+	fprintf(f, "\t index %u ref %d bind %d", ci->index,
+		ci->refcnt, ci->bindcnt);
 
 	if (show_stats) {
 		if (tb[TCA_CONNMARK_TM]) {
@@ -137,7 +133,7 @@ static int print_connmark(struct action_util *au, FILE *f, struct rtattr *arg)
 			print_tm(f, tm);
 		}
 	}
-	print_string(PRINT_FP, NULL, "%s", _SL_);
+	fprintf(f, "\n");
 
 	return 0;
 }

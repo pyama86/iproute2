@@ -22,9 +22,7 @@ tipc: $(TIPCOBJ)
 	$(QUIET_LINK)$(CC) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 install: all
-	for i in $(TARGETS); \
-	do install -m 0755 $$i $(DESTDIR)$(SBINDIR); \
-	done
+	install -m 0755 $(TARGETS) $(DESTDIR)$(SBINDIR)
 
 clean:
 	rm -f $(TIPCOBJ) $(TARGETS)

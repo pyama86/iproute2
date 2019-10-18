@@ -25,6 +25,8 @@
 #include "utils.h"
 #include "tc_util.h"
 
+extern int show_pretty;
+
 static void explain(void)
 {
 	fprintf(stderr,
@@ -963,7 +965,7 @@ static void show_keys(FILE *f, const struct tc_u32_key *key)
 {
 	int i = 0;
 
-	if (!pretty)
+	if (!show_pretty)
 		goto show_k;
 
 	for (i = 0; i < ARRAY_SIZE(u32_pprinters); i++) {
@@ -1001,7 +1003,8 @@ static int u32_parse_opt(struct filter_util *qu, char *handle,
 	if (argc == 0)
 		return 0;
 
-	tail = addattr_nest(n, MAX_MSG, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, TCA_OPTIONS, NULL, 0);
 
 	while (argc > 0) {
 		if (matches(*argv, "match") == 0) {
@@ -1147,9 +1150,13 @@ static int u32_parse_opt(struct filter_util *qu, char *handle,
 			terminal_ok++;
 			continue;
 		} else if (strcmp(*argv, "skip_hw") == 0) {
+			NEXT_ARG();
 			flags |= TCA_CLS_FLAGS_SKIP_HW;
+			continue;
 		} else if (strcmp(*argv, "skip_sw") == 0) {
+			NEXT_ARG();
 			flags |= TCA_CLS_FLAGS_SKIP_SW;
+			continue;
 		} else if (strcmp(*argv, "help") == 0) {
 			explain();
 			return -1;
@@ -1161,7 +1168,7 @@ static int u32_parse_opt(struct filter_util *qu, char *handle,
 		argc--; argv++;
 	}
 
-	/* We don't necessarily need class/flowids */
+	/* We dont necessarily need class/flowids */
 	if (terminal_ok)
 		sel.sel.flags |= TC_U32_TERMINAL;
 
@@ -1190,7 +1197,7 @@ static int u32_parse_opt(struct filter_util *qu, char *handle,
 		addattr_l(n, MAX_MSG, TCA_U32_FLAGS, &flags, 4);
 	}
 
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 

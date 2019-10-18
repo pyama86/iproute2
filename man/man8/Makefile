@@ -23,8 +23,4 @@ install:
 	$(INSTALLDIR) $(DESTDIR)$(MANDIR)/man8
 	$(INSTALLMAN) $(MAN8PAGES) $(DESTDIR)$(MANDIR)/man8
 
-check: all
-	@for page in $(MAN8PAGES); do test 0 -eq $$($(MAN_CHECK) $$page \
-		$(MAN_REDIRECT)) || { echo "Error in $$page"; exit 1; }; done
-
-.PHONY: install clean distclean check
+.PHONY: install clean distclean

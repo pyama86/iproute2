@@ -53,7 +53,8 @@ explain(void)
 			"\tINDEX := index value used\n"
 			"\n");
 #else
-	fprintf(stderr, "Usage: ... gact <ACTION> [INDEX]\n"
+	fprintf(stderr, "Usage: ... gact <ACTION> [INDEX]\n");
+	fprintf(stderr,
 		"Where: \tACTION := reclassify | drop | continue | pass | pipe |\n"
 		"       \t          goto chain <CHAIN_INDEX> | jump <JUMP_COUNT>\n"
 		"\tINDEX := index value used\n"
@@ -88,9 +89,6 @@ parse_gact(struct action_util *a, int *argc_p, char ***argv_p,
 
 	if (!matches(*argv, "gact"))
 		NEXT_ARG_FWD();
-	/* we're binding existing gact action to filter by index. */
-	if (!matches(*argv, "index"))
-		goto skip_args;
 	if (parse_action_control(&argc, &argv, &p.action, false))
 		usage();	/* does not return */
 
@@ -135,7 +133,6 @@ parse_gact(struct action_util *a, int *argc_p, char ***argv_p,
 
 	if (argc > 0) {
 		if (matches(*argv, "index") == 0) {
-skip_args:
 			NEXT_ARG();
 			if (get_u32(&p.index, *argv, 10)) {
 				fprintf(stderr, "Illegal \"index\"\n");
@@ -148,13 +145,14 @@ skip_args:
 		}
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_GACT_PARMS, &p, sizeof(p));
 #ifdef CONFIG_GACT_PROB
 	if (rd)
 		addattr_l(n, MAX_MSG, TCA_GACT_PROB, &pp, sizeof(pp));
 #endif
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -177,7 +175,7 @@ print_gact(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_GACT_MAX, arg);
 
 	if (tb[TCA_GACT_PARMS] == NULL) {
-		fprintf(stderr, "Missing gact parameters\n");
+		print_string(PRINT_FP, NULL, "%s", "[NULL gact parameters]");
 		return -1;
 	}
 	p = RTA_DATA(tb[TCA_GACT_PARMS]);

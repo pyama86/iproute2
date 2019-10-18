@@ -4,7 +4,7 @@ SUBDIRS := $(filter-out Makefile,$(wildcard *))
 
 all: configure
 	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir; \
+		echo "Entering $$dir" && cd $$dir && $(MAKE) && cd ..; \
 	done
 
 link:
@@ -19,12 +19,12 @@ configure: link
 
 clean: link
 	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir clean; \
+		echo "Entering $$dir" && cd $$dir && $(MAKE) clean && cd ..; \
 	done
 
 distclean: clean
 	@for dir in $(SUBDIRS); do \
-		$(MAKE) -C $$dir distclean; \
+		echo "Entering $$dir" && cd $$dir && $(MAKE) distclean && cd ..; \
 	done
 
 show: link

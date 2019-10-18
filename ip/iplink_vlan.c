@@ -22,17 +22,16 @@ static void print_explain(FILE *f)
 {
 	fprintf(f,
 		"Usage: ... vlan id VLANID\n"
-		"		[ protocol VLANPROTO ]\n"
-		"		[ reorder_hdr { on | off } ]\n"
-		"		[ gvrp { on | off } ]\n"
-		"		[ mvrp { on | off } ]\n"
-		"		[ loose_binding { on | off } ]\n"
-		"		[ bridge_binding { on | off } ]\n"
-		"		[ ingress-qos-map QOS-MAP ]\n"
-		"		[ egress-qos-map QOS-MAP ]\n"
+		"                [ protocol VLANPROTO ]\n"
+		"                [ reorder_hdr { on | off } ]\n"
+		"                [ gvrp { on | off } ]\n"
+		"                [ mvrp { on | off } ]\n"
+		"                [ loose_binding { on | off } ]\n"
+		"                [ ingress-qos-map QOS-MAP ]\n"
+		"                [ egress-qos-map QOS-MAP ]\n"
 		"\n"
 		"VLANID := 0-4095\n"
-		"VLANPROTO: [ 802.1Q | 802.1ad ]\n"
+		"VLANPROTO: [ 802.1Q / 802.1ad ]\n"
 		"QOS-MAP := [ QOS-MAP ] QOS-MAPPING\n"
 		"QOS-MAPPING := FROM:TO\n"
 	);
@@ -57,7 +56,8 @@ static int vlan_parse_qos_map(int *argcp, char ***argvp, struct nlmsghdr *n,
 	struct ifla_vlan_qos_mapping m;
 	struct rtattr *tail;
 
-	tail = addattr_nest(n, 1024, attrtype);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, attrtype, NULL, 0);
 
 	while (argc > 0) {
 		char *colon = strchr(*argv, ':');
@@ -75,7 +75,7 @@ static int vlan_parse_qos_map(int *argcp, char ***argvp, struct nlmsghdr *n,
 		addattr_l(n, 1024, IFLA_VLAN_QOS_MAPPING, &m, sizeof(m));
 	}
 
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *)tail;
 
 	*argcp = argc;
 	*argvp = argv;
@@ -135,15 +135,6 @@ static int vlan_parse_opt(struct link_util *lu, int argc, char **argv,
 				flags.flags &= ~VLAN_FLAG_LOOSE_BINDING;
 			else
 				return on_off("loose_binding", *argv);
-		} else if (matches(*argv, "bridge_binding") == 0) {
-			NEXT_ARG();
-			flags.mask |= VLAN_FLAG_BRIDGE_BINDING;
-			if (strcmp(*argv, "on") == 0)
-				flags.flags |= VLAN_FLAG_BRIDGE_BINDING;
-			else if (strcmp(*argv, "off") == 0)
-				flags.flags &= ~VLAN_FLAG_BRIDGE_BINDING;
-			else
-				return on_off("bridge_binding", *argv);
 		} else if (matches(*argv, "ingress-qos-map") == 0) {
 			NEXT_ARG();
 			if (vlan_parse_qos_map(&argc, &argv, n,
@@ -214,7 +205,6 @@ static void vlan_print_flags(FILE *fp, __u32 flags)
 	_PF(GVRP);
 	_PF(MVRP);
 	_PF(LOOSE_BINDING);
-	_PF(BRIDGE_BINDING);
 #undef _PF
 	if (flags)
 		print_hex(PRINT_ANY, NULL, "%x", flags);

@@ -24,8 +24,6 @@
 #include "cmdl.h"
 
 int help_flag;
-int json;
-int pretty;
 
 static void about(struct cmdl *cmdl)
 {
@@ -35,8 +33,6 @@ static void about(struct cmdl *cmdl)
 		"\n"
 		"Options:\n"
 		" -h, --help \t\tPrint help for last given command\n"
-		" -j, --json \t\tJson format printouts\n"
-		" -p, --pretty \t\tpretty print\n"
 		"\n"
 		"Commands:\n"
 		" bearer                - Show or modify bearers\n"
@@ -57,8 +53,6 @@ int main(int argc, char *argv[])
 	const struct cmd cmd = {"tipc", NULL, about};
 	struct option long_options[] = {
 		{"help", no_argument, 0, 'h'},
-		{"json", no_argument, 0, 'j'},
-		{"pretty", no_argument, 0, 'p'},
 		{0, 0, 0, 0}
 	};
 	const struct cmd cmds[] = {
@@ -75,7 +69,7 @@ int main(int argc, char *argv[])
 	do {
 		int option_index = 0;
 
-		i = getopt_long(argc, argv, "hjp", long_options, &option_index);
+		i = getopt_long(argc, argv, "h", long_options, &option_index);
 
 		switch (i) {
 		case 'h':
@@ -84,18 +78,6 @@ int main(int argc, char *argv[])
 			 * here in order to print later.
 			 */
 			help_flag = 1;
-			break;
-		case 'j':
-			/*
-			 * Enable json format printouts
-			 */
-			json = 1;
-			break;
-		case 'p':
-			/*
-			 * Enable json pretty output
-			 */
-			pretty = 1;
 			break;
 		case -1:
 			/* End of options */

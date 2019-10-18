@@ -20,20 +20,18 @@
 #include "cmdl.h"
 #include "msg.h"
 #include "nametable.h"
-#include "misc.h"
-#include "utils.h"
 
 #define PORTID_STR_LEN 45 /* Four u32 and five delimiter chars */
 
 static int nametable_show_cb(const struct nlmsghdr *nlh, void *data)
 {
 	int *iteration = data;
+	char port_id[PORTID_STR_LEN];
 	struct genlmsghdr *genl = mnl_nlmsg_get_payload(nlh);
 	struct nlattr *info[TIPC_NLA_MAX + 1] = {};
 	struct nlattr *attrs[TIPC_NLA_NAME_TABLE_MAX + 1] = {};
 	struct nlattr *publ[TIPC_NLA_PUBL_MAX + 1] = {};
 	const char *scope[] = { "", "zone", "cluster", "node" };
-	char str[33] = {0,};
 
 	mnl_attr_parse(nlh, sizeof(*genl), parse_attrs, info);
 	if (!info[TIPC_NLA_NAME_TABLE])
@@ -47,33 +45,26 @@ static int nametable_show_cb(const struct nlmsghdr *nlh, void *data)
 	if (!publ[TIPC_NLA_NAME_TABLE_PUBL])
 		return MNL_CB_ERROR;
 
-	if (!*iteration && !is_json_context())
-		printf("%-10s %-10s %-10s %-8s %-10s %-33s\n",
-		       "Type", "Lower", "Upper", "Scope", "Port",
-		       "Node");
+	if (!*iteration)
+		printf("%-10s %-10s %-10s %-26s %-10s\n",
+		       "Type", "Lower", "Upper", "Port Identity",
+		       "Publication Scope");
 	(*iteration)++;
 
-	hash2nodestr(mnl_attr_get_u32(publ[TIPC_NLA_PUBL_NODE]), str);
+	snprintf(port_id, sizeof(port_id), "<%u.%u.%u:%u>",
+		 tipc_zone(mnl_attr_get_u32(publ[TIPC_NLA_PUBL_NODE])),
+		 tipc_cluster(mnl_attr_get_u32(publ[TIPC_NLA_PUBL_NODE])),
+		 tipc_node(mnl_attr_get_u32(publ[TIPC_NLA_PUBL_NODE])),
+		 mnl_attr_get_u32(publ[TIPC_NLA_PUBL_REF]));
 
-	open_json_object(NULL);
-	print_uint(PRINT_ANY, "type", "%-10u",
-			   mnl_attr_get_u32(publ[TIPC_NLA_PUBL_TYPE]));
-	print_string(PRINT_FP, NULL, " ", "");
-	print_uint(PRINT_ANY, "lower", "%-10u",
-			   mnl_attr_get_u32(publ[TIPC_NLA_PUBL_LOWER]));
-	print_string(PRINT_FP, NULL, " ", "");
-	print_uint(PRINT_ANY, "upper", "%-10u",
-			   mnl_attr_get_u32(publ[TIPC_NLA_PUBL_UPPER]));
-	print_string(PRINT_FP, NULL, " ", "");
-	print_string(PRINT_ANY, "scope", "%-8s",
-			     scope[mnl_attr_get_u32(publ[TIPC_NLA_PUBL_SCOPE])]);
-	print_string(PRINT_FP, NULL, " ", "");
-	print_uint(PRINT_ANY, "port", "%-10u",
-			   mnl_attr_get_u32(publ[TIPC_NLA_PUBL_REF]));
-	print_string(PRINT_FP, NULL, " ", "");
-	print_string(PRINT_ANY, "node", "%s", str);
-	print_string(PRINT_FP, NULL, "\n", "");
-	close_json_object();
+	printf("%-10u %-10u %-10u %-26s %-12u",
+	       mnl_attr_get_u32(publ[TIPC_NLA_PUBL_TYPE]),
+	       mnl_attr_get_u32(publ[TIPC_NLA_PUBL_LOWER]),
+	       mnl_attr_get_u32(publ[TIPC_NLA_PUBL_UPPER]),
+	       port_id,
+	       mnl_attr_get_u32(publ[TIPC_NLA_PUBL_KEY]));
+
+	printf("%s\n", scope[mnl_attr_get_u32(publ[TIPC_NLA_PUBL_SCOPE])]);
 
 	return MNL_CB_OK;
 }
@@ -83,7 +74,6 @@ static int cmd_nametable_show(struct nlmsghdr *nlh, const struct cmd *cmd,
 {
 	int iteration = 0;
 	char buf[MNL_SOCKET_BUFFER_SIZE];
-	int rc = 0;
 
 	if (help_flag) {
 		fprintf(stderr, "Usage: %s nametable show\n", cmdl->argv[0]);
@@ -95,11 +85,7 @@ static int cmd_nametable_show(struct nlmsghdr *nlh, const struct cmd *cmd,
 		return -1;
 	}
 
-	new_json_obj(json);
-	rc = msg_dumpit(nlh, nametable_show_cb, &iteration);
-	delete_json_obj();
-
-	return rc;
+	return msg_dumpit(nlh, nametable_show_cb, &iteration);
 }
 
 void cmd_nametable_help(struct cmdl *cmdl)

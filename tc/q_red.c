@@ -27,10 +27,9 @@
 
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage: ... red	limit BYTES [min BYTES] [max BYTES] avpkt BYTES [burst PACKETS]\n"
-		"		[adaptive] [probability PROBABILITY] [bandwidth KBPS]\n"
-		"		[ecn] [harddrop]\n");
+	fprintf(stderr, "Usage: ... red limit BYTES [min BYTES] [max BYTES] avpkt BYTES [burst PACKETS]\n");
+	fprintf(stderr, "               [adaptive] [probability PROBABILITY] [bandwidth KBPS]\n");
+	fprintf(stderr, "               [ecn] [harddrop]\n");
 }
 
 static int red_parse_opt(struct qdisc_util *qu, int argc, char **argv,
@@ -149,12 +148,13 @@ static int red_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 	}
 	opt.Scell_log = parm;
 
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 	addattr_l(n, 1024, TCA_RED_PARMS, &opt, sizeof(opt));
 	addattr_l(n, 1024, TCA_RED_STAB, sbuf, 256);
 	max_P = probability * pow(2, 32);
 	addattr_l(n, 1024, TCA_RED_MAX_P, &max_P, sizeof(max_P));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 
@@ -190,8 +190,18 @@ static int red_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 	print_uint(PRINT_JSON, "max", NULL, qopt->qth_max);
 	print_string(PRINT_FP, NULL, "max %s ", sprint_size(qopt->qth_max, b3));
 
-	tc_red_print_flags(qopt->flags);
-
+	if (qopt->flags & TC_RED_ECN)
+		print_bool(PRINT_ANY, "ecn", "ecn ", true);
+	else
+		print_bool(PRINT_ANY, "ecn", NULL, false);
+	if (qopt->flags & TC_RED_HARDDROP)
+		print_bool(PRINT_ANY, "harddrop", "harddrop ", true);
+	else
+		print_bool(PRINT_ANY, "harddrop", NULL, false);
+	if (qopt->flags & TC_RED_ADAPTATIVE)
+		print_bool(PRINT_ANY, "adaptive", "adaptive ", true);
+	else
+		print_bool(PRINT_ANY, "adaptive", NULL, false);
 	if (show_details) {
 		print_uint(PRINT_ANY, "ewma", "ewma %u ", qopt->Wlog);
 		if (max_P)

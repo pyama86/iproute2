@@ -69,12 +69,9 @@ static int fifo_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 	qopt = RTA_DATA(opt);
 	if (strcmp(qu->id, "bfifo") == 0) {
 		SPRINT_BUF(b1);
-		print_uint(PRINT_JSON, "limit", NULL, qopt->limit);
-		print_string(PRINT_FP, NULL, "limit %s",
-			     sprint_size(qopt->limit, b1));
-	} else {
-		print_uint(PRINT_ANY, "limit", "limit %up", qopt->limit);
-	}
+		fprintf(f, "limit %s", sprint_size(qopt->limit, b1));
+	} else
+		fprintf(f, "limit %up", qopt->limit);
 	return 0;
 }
 
@@ -97,6 +94,7 @@ struct qdisc_util pfifo_head_drop_qdisc_util = {
 	.print_qopt = fifo_print_opt,
 };
 
+extern int prio_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt);
 struct qdisc_util pfifo_fast_qdisc_util = {
 	.id = "pfifo_fast",
 	.print_qopt = prio_print_opt,

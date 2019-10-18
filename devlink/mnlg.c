@@ -85,13 +85,6 @@ static int mnlg_cb_error(const struct nlmsghdr *nlh, void *data)
 
 static int mnlg_cb_stop(const struct nlmsghdr *nlh, void *data)
 {
-	int len = *(int *)NLMSG_DATA(nlh);
-
-	if (len < 0) {
-		errno = -len;
-		nl_dump_ext_ack_done(nlh, len);
-		return MNL_CB_ERROR;
-	}
 	return MNL_CB_STOP;
 }
 
@@ -206,7 +199,7 @@ int mnlg_socket_group_add(struct mnlg_socket *nlg, const char *group_name)
 
 	nlh = __mnlg_msg_prepare(nlg, CTRL_CMD_GETFAMILY,
 				 NLM_F_REQUEST | NLM_F_ACK, GENL_ID_CTRL, 1);
-	mnl_attr_put_u16(nlh, CTRL_ATTR_FAMILY_ID, nlg->id);
+	mnl_attr_put_u32(nlh, CTRL_ATTR_FAMILY_ID, nlg->id);
 
 	err = mnlg_socket_send(nlg, nlh);
 	if (err < 0)
@@ -278,9 +271,15 @@ struct mnlg_socket *mnlg_socket_open(const char *family_name, uint8_t version)
 	if (!nlg->nl)
 		goto err_mnl_socket_open;
 
-	/* Older kernels may no support capped/extended ACK reporting */
-	mnl_socket_setsockopt(nlg->nl, NETLINK_CAP_ACK, &one, sizeof(one));
-	mnl_socket_setsockopt(nlg->nl, NETLINK_EXT_ACK, &one, sizeof(one));
+	err = mnl_socket_setsockopt(nlg->nl, NETLINK_CAP_ACK, &one,
+				    sizeof(one));
+	if (err)
+		goto err_mnl_set_ack;
+
+	err = mnl_socket_setsockopt(nlg->nl, NETLINK_EXT_ACK, &one,
+				    sizeof(one));
+	if (err)
+		goto err_mnl_set_ext_ack;
 
 	err = mnl_socket_bind(nlg->nl, 0, MNL_SOCKET_AUTOPID);
 	if (err < 0)
@@ -306,6 +305,8 @@ struct mnlg_socket *mnlg_socket_open(const char *family_name, uint8_t version)
 err_mnlg_socket_recv_run:
 err_mnlg_socket_send:
 err_mnl_socket_bind:
+err_mnl_set_ext_ack:
+err_mnl_set_ack:
 	mnl_socket_close(nlg->nl);
 err_mnl_socket_open:
 	free(nlg->buf);

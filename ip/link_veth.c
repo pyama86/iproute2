@@ -29,47 +29,59 @@ static void usage(void)
 }
 
 static int veth_parse_opt(struct link_util *lu, int argc, char **argv,
-			  struct nlmsghdr *n)
+			  struct nlmsghdr *hdr)
 {
+	char *dev = NULL;
+	char *name = NULL;
+	char *link = NULL;
 	char *type = NULL;
+	int index = 0;
 	int err;
 	struct rtattr *data;
+	int group;
 	struct ifinfomsg *ifm, *peer_ifm;
-	unsigned int ifi_flags, ifi_change, ifi_index;
+	unsigned int ifi_flags, ifi_change;
 
 	if (strcmp(argv[0], "peer") != 0) {
 		usage();
 		return -1;
 	}
 
-	ifm = NLMSG_DATA(n);
+	ifm = NLMSG_DATA(hdr);
 	ifi_flags = ifm->ifi_flags;
 	ifi_change = ifm->ifi_change;
-	ifi_index = ifm->ifi_index;
 	ifm->ifi_flags = 0;
 	ifm->ifi_change = 0;
-	ifm->ifi_index = 0;
 
-	data = addattr_nest(n, 1024, VETH_INFO_PEER);
+	data = NLMSG_TAIL(hdr);
+	addattr_l(hdr, 1024, VETH_INFO_PEER, NULL, 0);
 
-	n->nlmsg_len += sizeof(struct ifinfomsg);
+	hdr->nlmsg_len += sizeof(struct ifinfomsg);
 
-	err = iplink_parse(argc - 1, argv + 1, (struct iplink_req *)n, &type);
+	err = iplink_parse(argc - 1, argv + 1, (struct iplink_req *)hdr,
+			   &name, &type, &link, &dev, &group, &index);
 	if (err < 0)
 		return err;
 
 	if (type)
 		duparg("type", argv[err]);
 
+	if (name) {
+		addattr_l(hdr, 1024,
+			  IFLA_IFNAME, name, strlen(name) + 1);
+	}
+
 	peer_ifm = RTA_DATA(data);
-	peer_ifm->ifi_index = ifm->ifi_index;
+	peer_ifm->ifi_index = index;
 	peer_ifm->ifi_flags = ifm->ifi_flags;
 	peer_ifm->ifi_change = ifm->ifi_change;
 	ifm->ifi_flags = ifi_flags;
 	ifm->ifi_change = ifi_change;
-	ifm->ifi_index = ifi_index;
 
-	addattr_nest_end(n, data);
+	if (group != -1)
+		addattr32(hdr, 1024, IFLA_GROUP, group);
+
+	data->rta_len = (void *)NLMSG_TAIL(hdr) - (void *)data;
 	return argc - 1 - err;
 }
 

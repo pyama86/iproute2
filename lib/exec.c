@@ -5,10 +5,8 @@
 #include <unistd.h>
 
 #include "utils.h"
-#include "namespace.h"
 
-int cmd_exec(const char *cmd, char **argv, bool do_fork,
-	     int (*setup)(void *), void *arg)
+int cmd_exec(const char *cmd, char **argv, bool do_fork)
 {
 	fflush(stdout);
 	if (do_fork) {
@@ -35,9 +33,6 @@ int cmd_exec(const char *cmd, char **argv, bool do_fork,
 			exit(1);
 		}
 	}
-
-	if (setup && setup(arg))
-		return -1;
 
 	if (execvp(cmd, argv)  < 0)
 		fprintf(stderr, "exec of \"%s\" failed: %s\n",

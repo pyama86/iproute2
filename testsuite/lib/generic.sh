@@ -26,17 +26,16 @@ ts_skip()
     exit 127
 }
 
-__ts_cmd()
+ts_tc()
 {
-	CMD=$1; shift
 	SCRIPT=$1; shift
 	DESC=$1; shift
 
-	$CMD $@ 2> $STD_ERR > $STD_OUT
+	$TC $@ 2> $STD_ERR > $STD_OUT
 
 	if [ -s $STD_ERR ]; then
 		ts_err "${SCRIPT}: ${DESC} failed:"
-		ts_err "command: $CMD $@"
+		ts_err "command: $TC $@"
 		ts_err "stderr output:"
 		ts_err_cat $STD_ERR
 		if [ -s $STD_OUT ]; then
@@ -51,19 +50,29 @@ __ts_cmd()
 	fi
 }
 
-ts_tc()
-{
-	__ts_cmd "$TC" "$@"
-}
-
 ts_ip()
 {
-	__ts_cmd "$IP" "$@"
-}
+	SCRIPT=$1; shift
+	DESC=$1; shift
 
-ts_ss()
-{
-	__ts_cmd "$SS" "$@"
+	$IP $@ 2> $STD_ERR > $STD_OUT
+        RET=$?
+
+	if [ -s $STD_ERR ] || [ "$RET" != "0" ]; then
+		ts_err "${SCRIPT}: ${DESC} failed:"
+		ts_err "command: $IP $@"
+		ts_err "stderr output:"
+		ts_err_cat $STD_ERR
+		if [ -s $STD_OUT ]; then
+			ts_err "stdout output:"
+			ts_err_cat $STD_OUT
+		fi
+	elif [ -s $STD_OUT ]; then
+		echo "${SCRIPT}: ${DESC} succeeded with output:"
+		cat $STD_OUT
+	else
+		echo "${SCRIPT}: ${DESC} succeeded"
+	fi
 }
 
 ts_qdisc_available()

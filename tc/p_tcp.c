@@ -67,6 +67,7 @@ done:
 	return res;
 }
 struct m_pedit_util p_pedit_tcp = {
-	.id = "tcp",
-	.parse_peopt = parse_tcp,
+	NULL,
+	"tcp",
+	parse_tcp,
 };

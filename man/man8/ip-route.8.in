@@ -38,13 +38,7 @@ ip-route \- routing table management
 .B  tos
 .IR TOS " ] [ "
 .B  vrf
-.IR NAME " ] [ "
-.B  ipproto
-.IR PROTOCOL " ] [ "
-.B  sport
-.IR NUMBER " ] [ "
-.B  dport
-.IR NUMBER " ] "
+.IR NAME " ] "
 
 .ti -8
 .BR "ip route" " { " add " | " del " | " change " | " append " | "\
@@ -89,9 +83,7 @@ replace " } "
 .RB "{ " enabled " | " disabled " } ]"
 
 .ti -8
-.IR INFO_SPEC " := { " NH " | "
-.B nhid
-.IR ID " } " "OPTIONS FLAGS" " ["
+.IR INFO_SPEC " := " "NH OPTIONS FLAGS" " ["
 .B  nexthop
 .IR NH " ] ..."
 
@@ -109,7 +101,7 @@ replace " } "
 
 .ti -8
 .IR FAMILY " := [ "
-.BR inet " | " inet6 " | " mpls " | " bridge " | " link " ]"
+.BR inet " | " inet6 " | " ipx " | " dnet " | " mpls " | " bridge " | " link " ]"
 
 .ti -8
 .IR OPTIONS " := " FLAGS " [ "
@@ -189,8 +181,7 @@ throw " | " unreachable " | " prohibit " | " blackhole " | " nat " ]"
 
 .ti -8
 .IR ENCAP " := [ "
-.IR ENCAP_MPLS " | " ENCAP_IP " | " ENCAP_BPF " | "
-.IR ENCAP_SEG6 " | " ENCAP_SEG6LOCAL " ] "
+.IR MPLS " | " IP " | " BPF " | " SEG6 " | " SEG6LOCAL " ] "
 
 .ti -8
 .IR ENCAP_MPLS " := "
@@ -486,43 +477,43 @@ seconds and ms, msec or msecs to specify milliseconds.
 
 
 .TP
-.BI rttvar " TIME " "(Linux 2.3.15+ only)"
+.BI rttvar " TIME " "(2.3.15+ only)"
 the initial RTT variance estimate. Values are specified as with
 .BI rtt
 above.
 
 .TP
-.BI rto_min " TIME " "(Linux 2.6.23+ only)"
+.BI rto_min " TIME " "(2.6.23+ only)"
 the minimum TCP Retransmission TimeOut to use when communicating with this
 destination. Values are specified as with
 .BI rtt
 above.
 
 .TP
-.BI ssthresh " NUMBER " "(Linux 2.3.15+ only)"
+.BI ssthresh " NUMBER " "(2.3.15+ only)"
 an estimate for the initial slow start threshold.
 
 .TP
-.BI cwnd " NUMBER " "(Linux 2.3.15+ only)"
+.BI cwnd " NUMBER " "(2.3.15+ only)"
 the clamp for congestion window. It is ignored if the
 .B lock
 flag is not used.
 
 .TP
-.BI initcwnd " NUMBER " "(Linux 2.5.70+ only)"
+.BI initcwnd " NUMBER " "(2.5.70+ only)"
 the initial congestion window size for connections to this destination.
 Actual window size is this value multiplied by the MSS
 (``Maximal Segment Size'') for same connection. The default is
 zero, meaning to use the values specified in RFC2414.
 
 .TP
-.BI initrwnd " NUMBER " "(Linux 2.6.33+ only)"
+.BI initrwnd " NUMBER " "(2.6.33+ only)"
 the initial receive window size for connections to this destination.
 Actual window size is this value multiplied by the MSS of the connection.
 The default value is zero, meaning to use Slow Start value.
 
 .TP
-.BI features " FEATURES " (Linux 3.18+ only)
+.BI features " FEATURES " (3.18+ only)
 Enable or disable per-route features. Only available feature at this
 time is
 .B ecn
@@ -534,17 +525,17 @@ also be used even if the
 sysctl is set to 0.
 
 .TP
-.BI quickack " BOOL " "(Linux 3.11+ only)"
+.BI quickack " BOOL " "(3.11+ only)"
 Enable or disable quick ack for connections to this destination.
 
 .TP
-.BI fastopen_no_cookie " BOOL " "(Linux 4.15+ only)"
+.BI fastopen_no_cookie " BOOL " "(4.15+ only)"
 Enable TCP Fastopen without a cookie for connections to this destination.
 
 .TP
-.BI congctl " NAME " "(Linux 3.20+ only)"
+.BI congctl " NAME " "(3.20+ only)"
 .TP
-.BI "congctl lock" " NAME " "(Linux 3.20+ only)"
+.BI "congctl lock" " NAME " "(3.20+ only)"
 Sets a specific TCP congestion control algorithm only for a given destination.
 If not specified, Linux keeps the current global default TCP congestion control
 algorithm, or the one set from the application. If the modifier
@@ -557,14 +548,14 @@ control algorithm for that destination, thus it will be enforced/guaranteed to
 use the proposed algorithm.
 
 .TP
-.BI advmss " NUMBER " "(Linux 2.3.15+ only)"
+.BI advmss " NUMBER " "(2.3.15+ only)"
 the MSS ('Maximal Segment Size') to advertise to these
 destinations when establishing TCP connections. If it is not given,
 Linux uses a default value calculated from the first hop device MTU.
 (If the path to these destination is asymmetric, this guess may be wrong.)
 
 .TP
-.BI reordering " NUMBER " "(Linux 2.3.15+ only)"
+.BI reordering " NUMBER " "(2.3.15+ only)"
 Maximal reordering on the path to this destination.
 If it is not given, Linux uses the value selected with
 .B sysctl
@@ -591,15 +582,6 @@ argument lists:
 - is a weight for this element of a multipath
 route reflecting its relative bandwidth or quality.
 .in -8
-
-The internal buffer used in iproute2 limits the maximum number of nexthops that
-may be specified in one go. If only
-.I ADDRESS
-is given, the current buffer size allows for 144 IPv6 nexthops and 253 IPv4
-ones. For IPv4, this effectively limits the number of nexthops possible per
-route. With IPv6, further nexthops may be appended to the same route via
-.B "ip route append"
-command.
 
 .TP
 .BI scope " SCOPE_VAL"
@@ -689,10 +671,6 @@ Discovery messages. Namely:
 .sp
 
 .TP
-.BI nhid " ID"
-use nexthop object with given id as nexthop specification.
-.sp
-.TP
 .BI encap " ENCAPTYPE ENCAPHDR"
 attach tunnel encapsulation attributes to this route.
 .sp
@@ -743,8 +721,7 @@ is a set of encapsulation attributes specific to the
 .B tos
 .IR TOS " ] ["
 .B  ttl
-.IR TTL " ] [ "
-.BR key " ] [" csum " ] [ " seq " ] "
+.IR TTL " ]"
 .in -2
 .sp
 
@@ -799,7 +776,7 @@ is a set of encapsulation attributes specific to the
 .IR SEG6_ACTION " [ "
 .IR SEG6_ACTION_PARAM " ] "
 - Operation to perform on matching packets.
-The following actions are currently supported (\fBLinux 4.14+ only\fR).
+The following actions are currently supported (\fB4.14+ only\fR).
 .in +2
 
 .B End
@@ -847,7 +824,7 @@ address is set as described in \fBip-sr\fR(8).
 .in -8
 
 .TP
-.BI expires " TIME " "(Linux 4.4+ only)"
+.BI expires " TIME " "(4.4+ only)"
 the route will be deleted after the expires time.
 .B Only
 support IPv6 at present.
@@ -1068,18 +1045,6 @@ the firewall mark
 force the vrf device on which this packet will be routed.
 
 .TP
-.BI ipproto " PROTOCOL"
-ip protocol as seen by the route lookup
-
-.TP
-.BI sport " NUMBER"
-source port as seen by the route lookup
-
-.TP
-.BI dport " NUMBER"
-destination port as seen by the route lookup
-
-.TP
 .B connected
 if no source address
 .RB "(option " from ")"
@@ -1159,11 +1124,6 @@ Adds an ipv4 route with mpls encapsulation attributes attached to it.
 ip -6 route add 2001:db8:1::/64 encap seg6 mode encap segs 2001:db8:42::1,2001:db8:ffff::2 dev eth0
 .RS 4
 Adds an IPv6 route with SRv6 encapsulation and two segments attached.
-.RE
-.PP
-ip route add 10.1.1.0/30 nhid 10
-.RS 4
-Adds an ipv4 route using nexthop object with id 10.
 .RE
 .SH SEE ALSO
 .br

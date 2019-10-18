@@ -46,31 +46,29 @@ static void usage(void) __attribute__((noreturn));
 
 static void usage(void)
 {
-	fprintf(stderr,
-		"Usage: ip -f inet6 tunnel { add | change | del | show } [ NAME ]\n"
-		"          [ mode { ip6ip6 | ipip6 | ip6gre | vti6 | any } ]\n"
-		"          [ remote ADDR local ADDR ] [ dev PHYS_DEV ]\n"
-		"          [ encaplimit ELIM ]\n"
-		"          [ hoplimit TTL ] [ tclass TCLASS ] [ flowlabel FLOWLABEL ]\n"
-		"          [ dscp inherit ]\n"
-		"          [ [no]allow-localremote ]\n"
-		"          [ [i|o]seq ] [ [i|o]key KEY ] [ [i|o]csum ]\n"
-		"\n"
-		"Where: NAME      := STRING\n"
-		"       ADDR      := IPV6_ADDRESS\n"
-		"       ELIM      := { none | 0..255 }(default=%d)\n"
-		"       TTL       := 0..255 (default=%d)\n"
-		"       TCLASS    := { 0x0..0xff | inherit }\n"
-		"       FLOWLABEL := { 0x0..0xfffff | inherit }\n"
-		"       KEY       := { DOTTED_QUAD | NUMBER }\n",
-		IPV6_DEFAULT_TNL_ENCAP_LIMIT,
+	fprintf(stderr, "Usage: ip -f inet6 tunnel { add | change | del | show } [ NAME ]\n");
+	fprintf(stderr, "          [ mode { ip6ip6 | ipip6 | ip6gre | vti6 | any } ]\n");
+	fprintf(stderr, "          [ remote ADDR local ADDR ] [ dev PHYS_DEV ]\n");
+	fprintf(stderr, "          [ encaplimit ELIM ]\n");
+	fprintf(stderr, "          [ hoplimit TTL ] [ tclass TCLASS ] [ flowlabel FLOWLABEL ]\n");
+	fprintf(stderr, "          [ dscp inherit ]\n");
+	fprintf(stderr, "          [ [no]allow-localremote ]\n");
+	fprintf(stderr, "          [ [i|o]seq ] [ [i|o]key KEY ] [ [i|o]csum ]\n");
+	fprintf(stderr, "\n");
+	fprintf(stderr, "Where: NAME      := STRING\n");
+	fprintf(stderr, "       ADDR      := IPV6_ADDRESS\n");
+	fprintf(stderr, "       ELIM      := { none | 0..255 }(default=%d)\n",
+		IPV6_DEFAULT_TNL_ENCAP_LIMIT);
+	fprintf(stderr, "       TTL       := 0..255 (default=%d)\n",
 		DEFAULT_TNL_HOP_LIMIT);
+	fprintf(stderr, "       TCLASS    := { 0x0..0xff | inherit }\n");
+	fprintf(stderr, "       FLOWLABEL := { 0x0..0xfffff | inherit }\n");
+	fprintf(stderr, "       KEY       := { DOTTED_QUAD | NUMBER }\n");
 	exit(-1);
 }
 
-static void print_tunnel(const void *t)
+static void print_tunnel(struct ip6_tnl_parm2 *p)
 {
-	const struct ip6_tnl_parm2 *p = t;
 	char s1[1024];
 	char s2[1024];
 
@@ -297,8 +295,10 @@ static int parse_args(int argc, char **argv, int cmd, struct ip6_tnl_parm2 *p)
 	}
 	if (medium) {
 		p->link = ll_name_to_index(medium);
-		if (!p->link)
-			return nodev(medium);
+		if (p->link == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", medium);
+			return -1;
+		}
 	}
 	return 0;
 }
@@ -313,24 +313,13 @@ static void ip6_tnl_parm_init(struct ip6_tnl_parm2 *p, int apply_default)
 	}
 }
 
-static void ip6_tnl_parm_initialize(const struct tnl_print_nlmsg_info *info)
+/*
+ * @p1: user specified parameter
+ * @p2: database entry
+ */
+static int ip6_tnl_parm_match(const struct ip6_tnl_parm2 *p1,
+			      const struct ip6_tnl_parm2 *p2)
 {
-	const struct ifinfomsg *ifi = info->ifi;
-	const struct ip6_tnl_parm2 *p1 = info->p1;
-	struct ip6_tnl_parm2 *p2 = info->p2;
-
-	ip6_tnl_parm_init(p2, 0);
-	if (ifi->ifi_type == ARPHRD_IP6GRE)
-		p2->proto = IPPROTO_GRE;
-	p2->link = ifi->ifi_index;
-	strcpy(p2->name, p1->name);
-}
-
-static bool ip6_tnl_parm_match(const struct tnl_print_nlmsg_info *info)
-{
-	const struct ip6_tnl_parm2 *p1 = info->p1;
-	const struct ip6_tnl_parm2 *p2 = info->p2;
-
 	return ((!p1->link || p1->link == p2->link) &&
 		(!p1->name[0] || strcmp(p1->name, p2->name) == 0) &&
 		(IN6_IS_ADDR_UNSPECIFIED(&p1->laddr) ||
@@ -347,33 +336,90 @@ static bool ip6_tnl_parm_match(const struct tnl_print_nlmsg_info *info)
 		(!p1->flags || (p1->flags & p2->flags)));
 }
 
+static int do_tunnels_list(struct ip6_tnl_parm2 *p)
+{
+	char buf[512];
+	int err = -1;
+	FILE *fp = fopen("/proc/net/dev", "r");
+
+	if (fp == NULL) {
+		perror("fopen");
+		return -1;
+	}
+
+	/* skip two lines at the begenning of the file */
+	if (!fgets(buf, sizeof(buf), fp) ||
+	    !fgets(buf, sizeof(buf), fp)) {
+		fprintf(stderr, "/proc/net/dev read error\n");
+		goto end;
+	}
+
+	while (fgets(buf, sizeof(buf), fp) != NULL) {
+		char name[IFNAMSIZ];
+		int index, type;
+		struct ip6_tnl_parm2 p1 = {};
+		char *ptr;
+
+		buf[sizeof(buf) - 1] = '\0';
+		if ((ptr = strchr(buf, ':')) == NULL ||
+		    (*ptr++ = 0, sscanf(buf, "%s", name) != 1)) {
+			fprintf(stderr, "Wrong format for /proc/net/dev. Giving up.\n");
+			goto end;
+		}
+		if (p->name[0] && strcmp(p->name, name))
+			continue;
+		index = ll_name_to_index(name);
+		if (index == 0)
+			continue;
+		type = ll_index_to_type(index);
+		if (type == -1) {
+			fprintf(stderr, "Failed to get type of \"%s\"\n", name);
+			continue;
+		}
+		if (type != ARPHRD_TUNNEL6 && type != ARPHRD_IP6GRE)
+			continue;
+		ip6_tnl_parm_init(&p1, 0);
+		if (type == ARPHRD_IP6GRE)
+			p1.proto = IPPROTO_GRE;
+		strcpy(p1.name, name);
+		p1.link = ll_name_to_index(p1.name);
+		if (p1.link == 0)
+			continue;
+		if (tnl_get_ioctl(p1.name, &p1))
+			continue;
+		if (!ip6_tnl_parm_match(p, &p1))
+			continue;
+		print_tunnel(&p1);
+		if (show_stats)
+			tnl_print_stats(ptr);
+		printf("\n");
+	}
+	err = 0;
+ end:
+	fclose(fp);
+	return err;
+}
+
 static int do_show(int argc, char **argv)
 {
-	struct ip6_tnl_parm2 p, p1;
+	struct ip6_tnl_parm2 p;
 
+	ll_init_map(&rth);
 	ip6_tnl_parm_init(&p, 0);
 	p.proto = 0;  /* default to any */
 
 	if (parse_args(argc, argv, SIOCGETTUNNEL, &p) < 0)
 		return -1;
 
-	if (!p.name[0] || show_stats) {
-		struct tnl_print_nlmsg_info info = {
-			.p1    = &p,
-			.p2    = &p1,
-			.init  = ip6_tnl_parm_initialize,
-			.match = ip6_tnl_parm_match,
-			.print = print_tunnel,
-		};
-
-		return do_tunnels_list(&info);
+	if (!p.name[0] || show_stats)
+		do_tunnels_list(&p);
+	else {
+		if (tnl_get_ioctl(p.name, &p))
+			return -1;
+		print_tunnel(&p);
+		printf("\n");
 	}
 
-	if (tnl_get_ioctl(p.name, &p))
-		return -1;
-
-	print_tunnel(&p);
-	fputc('\n', stdout);
 	return 0;
 }
 
@@ -386,9 +432,6 @@ static int do_add(int cmd, int argc, char **argv)
 
 	if (parse_args(argc, argv, cmd, &p) < 0)
 		return -1;
-
-	if (!*p.name)
-		fprintf(stderr, "Tunnel interface name not specified\n");
 
 	if (p.proto == IPPROTO_GRE)
 		basedev = "ip6gre0";

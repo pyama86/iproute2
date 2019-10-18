@@ -190,29 +190,12 @@ static const struct rate_suffix {
 	{ NULL }
 };
 
-/* Parse a percent e.g: '30%'
- * return: 0 = ok, -1 = error, 1 = out of range
- */
-int parse_percent(double *val, const char *str)
-{
-	char *p;
-
-	*val = strtod(str, &p) / 100.;
-	if (*val > 1.0 || *val < 0.0)
-		return 1;
-	if (*p && strcmp(p, "%"))
-		return -1;
-
-	return 0;
-}
-
-static int parse_percent_rate(char *rate, size_t len,
-			      const char *str, const char *dev)
+int parse_percent_rate(char *rate, const char *str, const char *dev)
 {
 	long dev_mbit;
 	int ret;
-	double perc, rate_bit;
-	char *str_perc = NULL;
+	double perc, rate_mbit;
+	char *str_perc;
 
 	if (!dev[0]) {
 		fprintf(stderr, "No device specified; specify device to rate limit by percentage\n");
@@ -226,20 +209,20 @@ static int parse_percent_rate(char *rate, size_t len,
 	if (ret != 1)
 		goto malf;
 
-	ret = parse_percent(&perc, str_perc);
-	if (ret == 1) {
-		fprintf(stderr, "Invalid rate specified; should be between [0,100]%% but is %s\n", str);
-		goto err;
-	} else if (ret == -1) {
+	if (parse_percent(&perc, str_perc))
 		goto malf;
-	}
 
 	free(str_perc);
 
-	rate_bit = perc * dev_mbit * 1000 * 1000;
+	if (perc > 1.0 || perc < 0.0) {
+		fprintf(stderr, "Invalid rate specified; should be between [0,100]%% but is %s\n", str);
+		return -1;
+	}
 
-	ret = snprintf(rate, len, "%lf", rate_bit);
-	if (ret <= 0 || ret >= len) {
+	rate_mbit = perc * dev_mbit;
+
+	ret = snprintf(rate, 20, "%lf", rate_mbit);
+	if (ret <= 0 || ret >= 20) {
 		fprintf(stderr, "Unable to parse calculated rate\n");
 		return -1;
 	}
@@ -248,8 +231,6 @@ static int parse_percent_rate(char *rate, size_t len,
 
 malf:
 	fprintf(stderr, "Specified rate value could not be read or is malformed\n");
-err:
-	free(str_perc);
 	return -1;
 }
 
@@ -257,7 +238,7 @@ int get_percent_rate(unsigned int *rate, const char *str, const char *dev)
 {
 	char r_str[20];
 
-	if (parse_percent_rate(r_str, sizeof(r_str), str, dev))
+	if (parse_percent_rate(r_str, str, dev))
 		return -1;
 
 	return get_rate(rate, r_str);
@@ -267,7 +248,7 @@ int get_percent_rate64(__u64 *rate, const char *str, const char *dev)
 {
 	char r_str[20];
 
-	if (parse_percent_rate(r_str, sizeof(r_str), str, dev))
+	if (parse_percent_rate(r_str, str, dev))
 		return -1;
 
 	return get_rate64(rate, r_str);
@@ -353,6 +334,52 @@ char *sprint_rate(__u64 rate, char *buf)
 	return buf;
 }
 
+int get_time(unsigned int *time, const char *str)
+{
+	double t;
+	char *p;
+
+	t = strtod(str, &p);
+	if (p == str)
+		return -1;
+
+	if (*p) {
+		if (strcasecmp(p, "s") == 0 || strcasecmp(p, "sec") == 0 ||
+		    strcasecmp(p, "secs") == 0)
+			t *= TIME_UNITS_PER_SEC;
+		else if (strcasecmp(p, "ms") == 0 || strcasecmp(p, "msec") == 0 ||
+			 strcasecmp(p, "msecs") == 0)
+			t *= TIME_UNITS_PER_SEC/1000;
+		else if (strcasecmp(p, "us") == 0 || strcasecmp(p, "usec") == 0 ||
+			 strcasecmp(p, "usecs") == 0)
+			t *= TIME_UNITS_PER_SEC/1000000;
+		else
+			return -1;
+	}
+
+	*time = t;
+	return 0;
+}
+
+
+void print_time(char *buf, int len, __u32 time)
+{
+	double tmp = time;
+
+	if (tmp >= TIME_UNITS_PER_SEC)
+		snprintf(buf, len, "%.1fs", tmp/TIME_UNITS_PER_SEC);
+	else if (tmp >= TIME_UNITS_PER_SEC/1000)
+		snprintf(buf, len, "%.1fms", tmp/(TIME_UNITS_PER_SEC/1000));
+	else
+		snprintf(buf, len, "%uus", time);
+}
+
+char *sprint_time(__u32 time, char *buf)
+{
+	print_time(buf, SPRINT_BSIZE-1, time);
+	return buf;
+}
+
 char *sprint_ticks(__u32 ticks, char *buf)
 {
 	return sprint_time(tc_core_tick2time(ticks), buf);
@@ -417,18 +444,7 @@ int get_size_and_cell(unsigned int *size, int *cell_log, char *str)
 	return 0;
 }
 
-void print_devname(enum output_type type, int ifindex)
-{
-	const char *ifname = ll_index_to_name(ifindex);
-
-	if (!is_json_context())
-		printf("dev ");
-
-	print_color_string(type, COLOR_IFNAME,
-			   "dev", "%s ", ifname);
-}
-
-static void print_size(char *buf, int len, __u32 sz)
+void print_size(char *buf, int len, __u32 sz)
 {
 	double tmp = sz;
 
@@ -443,6 +459,17 @@ static void print_size(char *buf, int len, __u32 sz)
 char *sprint_size(__u32 size, char *buf)
 {
 	print_size(buf, SPRINT_BSIZE-1, size);
+	return buf;
+}
+
+void print_qdisc_handle(char *buf, int len, __u32 h)
+{
+	snprintf(buf, len, "%x:", TC_H_MAJ(h)>>16);
+}
+
+char *sprint_qdisc_handle(__u32 h, char *buf)
+{
+	print_qdisc_handle(buf, SPRINT_BSIZE-1, h);
 	return buf;
 }
 
@@ -717,7 +744,7 @@ int get_linklayer(unsigned int *val, const char *arg)
 	return 0;
 }
 
-static void print_linklayer(char *buf, int len, unsigned int linklayer)
+void print_linklayer(char *buf, int len, unsigned int linklayer)
 {
 	switch (linklayer) {
 	case LINKLAYER_UNSPEC:
@@ -762,44 +789,6 @@ void print_tm(FILE *f, const struct tcf_t *tm)
 	}
 }
 
-static void print_tcstats_basic_hw(struct rtattr **tbs, char *prefix)
-{
-	struct gnet_stats_basic bs_hw;
-
-	if (!tbs[TCA_STATS_BASIC_HW])
-		return;
-
-	memcpy(&bs_hw, RTA_DATA(tbs[TCA_STATS_BASIC_HW]),
-	       MIN(RTA_PAYLOAD(tbs[TCA_STATS_BASIC_HW]), sizeof(bs_hw)));
-
-	if (bs_hw.bytes == 0 && bs_hw.packets == 0)
-		return;
-
-	if (tbs[TCA_STATS_BASIC]) {
-		struct gnet_stats_basic bs;
-
-		memcpy(&bs, RTA_DATA(tbs[TCA_STATS_BASIC]),
-		       MIN(RTA_PAYLOAD(tbs[TCA_STATS_BASIC]),
-			   sizeof(bs)));
-
-		if (bs.bytes >= bs_hw.bytes && bs.packets >= bs_hw.packets) {
-			print_string(PRINT_FP, NULL, "%s", _SL_);
-			print_string(PRINT_FP, NULL, "%s", prefix);
-			print_lluint(PRINT_ANY, "sw_bytes",
-				     "Sent software %llu bytes",
-				     bs.bytes - bs_hw.bytes);
-			print_uint(PRINT_ANY, "sw_packets", " %u pkt",
-				   bs.packets - bs_hw.packets);
-		}
-	}
-
-	print_string(PRINT_FP, NULL, "%s", _SL_);
-	print_string(PRINT_FP, NULL, "%s", prefix);
-	print_lluint(PRINT_ANY, "hw_bytes", "Sent hardware %llu bytes",
-		     bs_hw.bytes);
-	print_uint(PRINT_ANY, "hw_packets", " %u pkt", bs_hw.packets);
-}
-
 void print_tcstats2_attr(FILE *fp, struct rtattr *rta, char *prefix, struct rtattr **xstats)
 {
 	SPRINT_BUF(b1);
@@ -826,9 +815,6 @@ void print_tcstats2_attr(FILE *fp, struct rtattr *rta, char *prefix, struct rtat
 		print_uint(PRINT_ANY, "requeues", " requeues %u) ", q.requeues);
 	}
 
-	if (tbs[TCA_STATS_BASIC_HW])
-		print_tcstats_basic_hw(tbs, prefix);
-
 	if (tbs[TCA_STATS_RATE_EST64]) {
 		struct gnet_stats_rate_est64 re = {0};
 
@@ -845,6 +831,8 @@ void print_tcstats2_attr(FILE *fp, struct rtattr *rta, char *prefix, struct rtat
 
 		memcpy(&re, RTA_DATA(tbs[TCA_STATS_RATE_EST]),
 		       MIN(RTA_PAYLOAD(tbs[TCA_STATS_RATE_EST]), sizeof(re)));
+		fprintf(fp, "\n%srate %s %upps ",
+			prefix, sprint_rate(re.bps, b1), re.pps);
 		print_string(PRINT_FP, NULL, "\n%s", prefix);
 		print_uint(PRINT_JSON, "rate", NULL, re.bps);
 		print_string(PRINT_FP, NULL, "rate %s",
@@ -857,9 +845,8 @@ void print_tcstats2_attr(FILE *fp, struct rtattr *rta, char *prefix, struct rtat
 
 		memcpy(&q, RTA_DATA(tbs[TCA_STATS_QUEUE]), MIN(RTA_PAYLOAD(tbs[TCA_STATS_QUEUE]), sizeof(q)));
 		if (!tbs[TCA_STATS_RATE_EST])
-			print_string(PRINT_FP, NULL, "\n", "");
+			print_string(PRINT_FP, NULL, "\n%s", prefix);
 		print_uint(PRINT_JSON, "backlog", NULL, q.backlog);
-		print_string(PRINT_FP, NULL, "%s", prefix);
 		print_string(PRINT_FP, NULL, "backlog %s",
 			     sprint_size(q.backlog, b1));
 		print_uint(PRINT_ANY, "qlen", " %up", q.qlen);
@@ -876,7 +863,7 @@ void print_tcstats_attr(FILE *fp, struct rtattr *tb[], char *prefix, struct rtat
 
 	if (tb[TCA_STATS2]) {
 		print_tcstats2_attr(fp, tb[TCA_STATS2], prefix, xstats);
-		if (xstats && !*xstats)
+		if (xstats && NULL == *xstats)
 			goto compat_xstats;
 		return;
 	}

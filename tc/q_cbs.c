@@ -24,9 +24,9 @@
 
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage: ... cbs hicredit BYTES locredit BYTES sendslope BPS idleslope BPS\n"
-		"	   [offload 0|1]\n");
+	fprintf(stderr, "Usage: ... cbs hicredit BYTES locredit BYTES sendslope BPS idleslope BPS\n");
+	fprintf(stderr, "           [offload 0|1]\n");
+
 }
 
 static void explain1(const char *arg, const char *val)
@@ -102,9 +102,10 @@ static int cbs_parse_opt(struct qdisc_util *qu, int argc,
 		argc--; argv++;
 	}
 
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 	addattr_l(n, 2024, TCA_CBS_PARMS, &opt, sizeof(opt));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 

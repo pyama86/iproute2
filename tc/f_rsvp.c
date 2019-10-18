@@ -25,16 +25,15 @@
 
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage:	... rsvp ipproto PROTOCOL session DST[/PORT | GPI ]\n"
-		"		[ sender SRC[/PORT | GPI ] ]\n"
-		"		[ classid CLASSID ] [ action ACTION_SPEC ]\n"
-		"		[ tunnelid ID ] [ tunnel ID skip NUMBER ]\n"
-		"Where:	GPI := { flowlabel NUMBER | spi/ah SPI | spi/esp SPI |\n"
-		"		u{8|16|32} NUMBER mask MASK at OFFSET}\n"
-		"	ACTION_SPEC := ... look at individual actions\n"
-		"	FILTERID := X:Y\n"
-		"\nNOTE: CLASSID is parsed as hexadecimal input.\n");
+	fprintf(stderr, "Usage: ... rsvp ipproto PROTOCOL session DST[/PORT | GPI ]\n");
+	fprintf(stderr, "                [ sender SRC[/PORT | GPI ] ]\n");
+	fprintf(stderr, "                [ classid CLASSID ] [ action ACTION_SPEC ]\n");
+	fprintf(stderr, "                [ tunnelid ID ] [ tunnel ID skip NUMBER ]\n");
+	fprintf(stderr, "Where: GPI := { flowlabel NUMBER | spi/ah SPI | spi/esp SPI |\n");
+	fprintf(stderr, "                u{8|16|32} NUMBER mask MASK at OFFSET}\n");
+	fprintf(stderr, "       ACTION_SPEC := ... look at individual actions\n");
+	fprintf(stderr, "       FILTERID := X:Y\n");
+	fprintf(stderr, "\nNOTE: CLASSID is parsed as hexadecimal input.\n");
 }
 
 static int get_addr_and_pi(int *argc_p, char ***argv_p, inet_prefix *addr,
@@ -189,7 +188,8 @@ static int rsvp_parse_opt(struct filter_util *qu, char *handle, int argc,
 	if (argc == 0)
 		return 0;
 
-	tail = addattr_nest(n, 4096, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 4096, TCA_OPTIONS, NULL, 0);
 
 	while (argc > 0) {
 		if (matches(*argv, "session") == 0) {
@@ -294,7 +294,7 @@ static int rsvp_parse_opt(struct filter_util *qu, char *handle, int argc,
 
 	if (pinfo_ok)
 		addattr_l(n, 4096, TCA_RSVP_PINFO, &pinfo, sizeof(pinfo));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 	return 0;
 }
 

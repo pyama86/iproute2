@@ -39,11 +39,7 @@ static int cmd_peer_rm_addr(struct nlmsghdr *nlh, const struct cmd *cmd,
 	}
 
 	str = shift_cmdl(cmdl);
-
-	/* First try legacy Z.C.N format, then integer format */
 	addr = str2addr(str);
-	if (!addr)
-		addr = atoi(str);
 	if (!addr)
 		return -1;
 

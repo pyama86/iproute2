@@ -22,24 +22,25 @@
 #include <linux/neighbour.h>
 #include <string.h>
 #include <limits.h>
+#include <json_writer.h>
 #include <stdbool.h>
 
-#include "json_print.h"
 #include "libnetlink.h"
 #include "br_common.h"
 #include "rt_names.h"
 #include "utils.h"
 
-static unsigned int filter_index, filter_vlan, filter_state, filter_master;
+static unsigned int filter_index, filter_vlan, filter_state;
+
+json_writer_t *jw_global;
 
 static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: bridge fdb { add | append | del | replace } ADDR dev DEV\n"
-		"              [ self ] [ master ] [ use ] [ router ] [ extern_learn ]\n"
-		"              [ sticky ] [ local | static | dynamic ] [ dst IPADDR ]\n"
-		"              [ vlan VID ] [ port PORT] [ vni VNI ] [ via DEV ]\n"
-		"              [ src_vni VNI ]\n"
+		"              [ self ] [ master ] [ use ] [ router ]\n"
+		"              [ local | static | dynamic ] [ dst IPADDR ] [ vlan VID ]\n"
+		"              [ port PORT] [ vni VNI ] [ via DEV ]\n"
 		"       bridge fdb [ show [ br BRDEV ] [ brport DEV ] [ vlan VID ] [ state STATE ] ]\n");
 	exit(-1);
 }
@@ -82,58 +83,24 @@ static int state_a2n(unsigned int *s, const char *arg)
 	return 0;
 }
 
-static void fdb_print_flags(FILE *fp, unsigned int flags)
+static void start_json_fdb_flags_array(bool *fdb_flags)
 {
-	open_json_array(PRINT_JSON,
-			is_json_context() ?  "flags" : "");
-
-	if (flags & NTF_SELF)
-		print_string(PRINT_ANY, NULL, "%s ", "self");
-
-	if (flags & NTF_ROUTER)
-		print_string(PRINT_ANY, NULL, "%s ", "router");
-
-	if (flags & NTF_EXT_LEARNED)
-		print_string(PRINT_ANY, NULL, "%s ", "extern_learn");
-
-	if (flags & NTF_OFFLOADED)
-		print_string(PRINT_ANY, NULL, "%s ", "offload");
-
-	if (flags & NTF_MASTER)
-		print_string(PRINT_ANY, NULL, "%s ", "master");
-
-	if (flags & NTF_STICKY)
-		print_string(PRINT_ANY, NULL, "%s ", "sticky");
-
-	close_json_array(PRINT_JSON, NULL);
+	if (*fdb_flags)
+		return;
+	jsonw_name(jw_global, "flags");
+	jsonw_start_array(jw_global);
+	*fdb_flags = true;
 }
 
-static void fdb_print_stats(FILE *fp, const struct nda_cacheinfo *ci)
-{
-	static int hz;
-
-	if (!hz)
-		hz = get_user_hz();
-
-	if (is_json_context()) {
-		print_uint(PRINT_JSON, "used", NULL,
-				 ci->ndm_used / hz);
-		print_uint(PRINT_JSON, "updated", NULL,
-				ci->ndm_updated / hz);
-	} else {
-		fprintf(fp, "used %d/%d ", ci->ndm_used / hz,
-					ci->ndm_updated / hz);
-
-	}
-}
-
-int print_fdb(struct nlmsghdr *n, void *arg)
+int print_fdb(const struct sockaddr_nl *who, struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = arg;
 	struct ndmsg *r = NLMSG_DATA(n);
 	int len = n->nlmsg_len;
 	struct rtattr *tb[NDA_MAX+1];
 	__u16 vid = 0;
+	bool fdb_flags = false;
+	const char *state_s;
 
 	if (n->nlmsg_type != RTM_NEWNEIGH && n->nlmsg_type != RTM_DELNEIGH) {
 		fprintf(stderr, "Not RTM_NEWNEIGH: %08x %08x %08x\n",
@@ -165,131 +132,189 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 	if (filter_vlan && filter_vlan != vid)
 		return 0;
 
-	open_json_object(NULL);
-	if (n->nlmsg_type == RTM_DELNEIGH)
-		print_bool(PRINT_ANY, "deleted", "Deleted ", true);
-
-	if (tb[NDA_LLADDR]) {
-		const char *lladdr;
-		SPRINT_BUF(b1);
-
-		lladdr = ll_addr_n2a(RTA_DATA(tb[NDA_LLADDR]),
-				     RTA_PAYLOAD(tb[NDA_LLADDR]),
-				     ll_index_to_type(r->ndm_ifindex),
-				     b1, sizeof(b1));
-
-		print_color_string(PRINT_ANY, COLOR_MAC,
-				   "mac", "%s ", lladdr);
+	if (jw_global) {
+		jsonw_pretty(jw_global, 1);
+		jsonw_start_object(jw_global);
 	}
 
-	if (!filter_index && r->ndm_ifindex)
-		print_color_string(PRINT_ANY, COLOR_IFNAME,
-				   "ifname", "dev %s ",
-				   ll_index_to_name(r->ndm_ifindex));
+	if (n->nlmsg_type == RTM_DELNEIGH) {
+		if (jw_global)
+			jsonw_string_field(jw_global, "opCode", "deleted");
+		else
+			fprintf(fp, "Deleted ");
+	}
+
+	if (tb[NDA_LLADDR]) {
+		SPRINT_BUF(b1);
+		ll_addr_n2a(RTA_DATA(tb[NDA_LLADDR]),
+			    RTA_PAYLOAD(tb[NDA_LLADDR]),
+			    ll_index_to_type(r->ndm_ifindex),
+			    b1, sizeof(b1));
+		if (jw_global)
+			jsonw_string_field(jw_global, "mac", b1);
+		else
+			fprintf(fp, "%s ", b1);
+	}
+
+	if (!filter_index && r->ndm_ifindex) {
+		if (jw_global)
+			jsonw_string_field(jw_global, "dev",
+					   ll_index_to_name(r->ndm_ifindex));
+		else
+			fprintf(fp, "dev %s ",
+				ll_index_to_name(r->ndm_ifindex));
+	}
 
 	if (tb[NDA_DST]) {
 		int family = AF_INET;
-		const char *dst;
+		const char *abuf_s;
 
 		if (RTA_PAYLOAD(tb[NDA_DST]) == sizeof(struct in6_addr))
 			family = AF_INET6;
 
-		dst = format_host(family,
-				  RTA_PAYLOAD(tb[NDA_DST]),
-				  RTA_DATA(tb[NDA_DST]));
-
-		print_color_string(PRINT_ANY,
-				   ifa_family_color(family),
-				    "dst", "dst %s ", dst);
+		abuf_s = format_host(family,
+				     RTA_PAYLOAD(tb[NDA_DST]),
+				     RTA_DATA(tb[NDA_DST]));
+		if (jw_global)
+			jsonw_string_field(jw_global, "dst", abuf_s);
+		else
+			fprintf(fp, "dst %s ", abuf_s);
 	}
 
-	if (vid)
-		print_uint(PRINT_ANY,
-				 "vlan", "vlan %hu ", vid);
+	if (vid) {
+		if (jw_global)
+			jsonw_uint_field(jw_global, "vlan", vid);
+		else
+			fprintf(fp, "vlan %hu ", vid);
+	}
 
-	if (tb[NDA_PORT])
-		print_uint(PRINT_ANY,
-				 "port", "port %u ",
-				 rta_getattr_be16(tb[NDA_PORT]));
+	if (tb[NDA_PORT]) {
+		if (jw_global)
+			jsonw_uint_field(jw_global, "port",
+					 rta_getattr_be16(tb[NDA_PORT]));
+		else
+			fprintf(fp, "port %d ",
+				rta_getattr_be16(tb[NDA_PORT]));
+	}
 
-	if (tb[NDA_VNI])
-		print_uint(PRINT_ANY,
-				 "vni", "vni %u ",
-				 rta_getattr_u32(tb[NDA_VNI]));
+	if (tb[NDA_VNI]) {
+		if (jw_global)
+			jsonw_uint_field(jw_global, "vni",
+					 rta_getattr_u32(tb[NDA_VNI]));
+		else
+			fprintf(fp, "vni %d ",
+				rta_getattr_u32(tb[NDA_VNI]));
+	}
 
-	if (tb[NDA_SRC_VNI])
-		print_uint(PRINT_ANY,
-				 "src_vni", "src_vni %u ",
+	if (tb[NDA_SRC_VNI]) {
+		if (jw_global)
+			jsonw_uint_field(jw_global, "src_vni",
+					 rta_getattr_u32(tb[NDA_SRC_VNI]));
+		else
+			fprintf(fp, "src_vni %d ",
 				rta_getattr_u32(tb[NDA_SRC_VNI]));
+	}
 
 	if (tb[NDA_IFINDEX]) {
 		unsigned int ifindex = rta_getattr_u32(tb[NDA_IFINDEX]);
 
-		if (tb[NDA_LINK_NETNSID])
-			print_uint(PRINT_ANY,
-					 "viaIfIndex", "via ifindex %u ",
-					 ifindex);
+		if (ifindex) {
+			if (!tb[NDA_LINK_NETNSID]) {
+				const char *ifname = ll_index_to_name(ifindex);
+
+				if (jw_global)
+					jsonw_string_field(jw_global, "viaIf",
+							   ifname);
+				else
+					fprintf(fp, "via %s ", ifname);
+			} else {
+				if (jw_global)
+					jsonw_uint_field(jw_global, "viaIfIndex",
+							 ifindex);
+				else
+					fprintf(fp, "via ifindex %u ", ifindex);
+			}
+		}
+	}
+
+	if (tb[NDA_LINK_NETNSID]) {
+		if (jw_global)
+			jsonw_uint_field(jw_global, "linkNetNsId",
+					 rta_getattr_u32(tb[NDA_LINK_NETNSID]));
 		else
-			print_string(PRINT_ANY,
-					   "viaIf", "via %s ",
-					   ll_index_to_name(ifindex));
+			fprintf(fp, "link-netnsid %d ",
+				rta_getattr_u32(tb[NDA_LINK_NETNSID]));
 	}
 
-	if (tb[NDA_LINK_NETNSID])
-		print_uint(PRINT_ANY,
-				 "linkNetNsId", "link-netnsid %d ",
-				 rta_getattr_u32(tb[NDA_LINK_NETNSID]));
+	if (show_stats && tb[NDA_CACHEINFO]) {
+		struct nda_cacheinfo *ci = RTA_DATA(tb[NDA_CACHEINFO]);
+		int hz = get_user_hz();
 
-	if (show_stats && tb[NDA_CACHEINFO])
-		fdb_print_stats(fp, RTA_DATA(tb[NDA_CACHEINFO]));
-
-	fdb_print_flags(fp, r->ndm_flags);
-
-
-	if (tb[NDA_MASTER])
-		print_string(PRINT_ANY, "master", "master %s ",
-			     ll_index_to_name(rta_getattr_u32(tb[NDA_MASTER])));
-
-	print_string(PRINT_ANY, "state", "%s\n",
-			   state_n2a(r->ndm_state));
-	close_json_object();
-	fflush(fp);
-	return 0;
-}
-
-static int fdb_linkdump_filter(struct nlmsghdr *nlh, int reqlen)
-{
-	int err;
-
-	if (filter_index) {
-		struct ifinfomsg *ifm = NLMSG_DATA(nlh);
-
-		ifm->ifi_index = filter_index;
+		if (jw_global) {
+			jsonw_uint_field(jw_global, "used",
+				ci->ndm_used/hz);
+			jsonw_uint_field(jw_global, "updated",
+				ci->ndm_updated/hz);
+		} else {
+			fprintf(fp, "used %d/%d ", ci->ndm_used/hz,
+					ci->ndm_updated/hz);
+		}
 	}
 
-	if (filter_master) {
-		err = addattr32(nlh, reqlen, IFLA_MASTER, filter_master);
-		if (err)
-			return err;
+	if (jw_global) {
+		if (r->ndm_flags & NTF_SELF) {
+			start_json_fdb_flags_array(&fdb_flags);
+			jsonw_string(jw_global, "self");
+		}
+		if (r->ndm_flags & NTF_ROUTER) {
+			start_json_fdb_flags_array(&fdb_flags);
+			jsonw_string(jw_global, "router");
+		}
+		if (r->ndm_flags & NTF_EXT_LEARNED) {
+			start_json_fdb_flags_array(&fdb_flags);
+			jsonw_string(jw_global, "extern_learn");
+		}
+		if (r->ndm_flags & NTF_OFFLOADED) {
+			start_json_fdb_flags_array(&fdb_flags);
+			jsonw_string(jw_global, "offload");
+		}
+		if (r->ndm_flags & NTF_MASTER)
+			jsonw_string(jw_global, "master");
+		if (fdb_flags)
+			jsonw_end_array(jw_global);
+
+		if (tb[NDA_MASTER])
+			jsonw_string_field(jw_global,
+					   "master",
+					   ll_index_to_name(rta_getattr_u32(tb[NDA_MASTER])));
+
+	} else {
+		if (r->ndm_flags & NTF_SELF)
+			fprintf(fp, "self ");
+		if (r->ndm_flags & NTF_ROUTER)
+			fprintf(fp, "router ");
+		if (r->ndm_flags & NTF_EXT_LEARNED)
+			fprintf(fp, "extern_learn ");
+		if (r->ndm_flags & NTF_OFFLOADED)
+			fprintf(fp, "offload ");
+		if (tb[NDA_MASTER]) {
+			fprintf(fp, "master %s ",
+				ll_index_to_name(rta_getattr_u32(tb[NDA_MASTER])));
+		} else if (r->ndm_flags & NTF_MASTER) {
+			fprintf(fp, "master ");
+		}
 	}
 
-	return 0;
-}
+	state_s = state_n2a(r->ndm_state);
+	if (jw_global) {
+		if (state_s[0])
+			jsonw_string_field(jw_global, "state", state_s);
 
-static int fdb_dump_filter(struct nlmsghdr *nlh, int reqlen)
-{
-	int err;
+		jsonw_end_object(jw_global);
+	} else {
+		fprintf(fp, "%s\n", state_s);
 
-	if (filter_index) {
-		struct ndmsg *ndm = NLMSG_DATA(nlh);
-
-		ndm->ndm_ifindex = filter_index;
-	}
-
-	if (filter_master) {
-		err = addattr32(nlh, reqlen, NDA_MASTER, filter_master);
-		if (err)
-			return err;
+		fflush(fp);
 	}
 
 	return 0;
@@ -297,9 +322,18 @@ static int fdb_dump_filter(struct nlmsghdr *nlh, int reqlen)
 
 static int fdb_show(int argc, char **argv)
 {
+	struct {
+		struct nlmsghdr	n;
+		struct ifinfomsg	ifm;
+		char			buf[256];
+	} req = {
+		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)),
+		.ifm.ifi_family = PF_BRIDGE,
+	};
+
 	char *filter_dev = NULL;
 	char *br = NULL;
-	int rc;
+	int msg_size = sizeof(struct ifinfomsg);
 
 	while (argc > 0) {
 		if ((strcmp(*argv, "brport") == 0) || strcmp(*argv, "dev") == 0) {
@@ -334,32 +368,42 @@ static int fdb_show(int argc, char **argv)
 			fprintf(stderr, "Cannot find bridge device \"%s\"\n", br);
 			return -1;
 		}
-		filter_master = br_ifindex;
+		addattr32(&req.n, sizeof(req), IFLA_MASTER, br_ifindex);
+		msg_size += RTA_LENGTH(4);
 	}
 
 	/*we'll keep around filter_dev for older kernels */
 	if (filter_dev) {
 		filter_index = ll_name_to_index(filter_dev);
-		if (!filter_index)
-			return nodev(filter_dev);
+		if (filter_index == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n",
+				filter_dev);
+			return -1;
+		}
+		req.ifm.ifi_index = filter_index;
 	}
 
-	if (rth.flags & RTNL_HANDLE_F_STRICT_CHK)
-		rc = rtnl_neighdump_req(&rth, PF_BRIDGE, fdb_dump_filter);
-	else
-		rc = rtnl_fdb_linkdump_req_filter_fn(&rth, fdb_linkdump_filter);
-	if (rc < 0) {
+	if (rtnl_dump_request(&rth, RTM_GETNEIGH, &req.ifm, msg_size) < 0) {
 		perror("Cannot send dump request");
 		exit(1);
 	}
 
-	new_json_obj(json);
+	if (json_output) {
+		jw_global = jsonw_new(stdout);
+		if (!jw_global) {
+			fprintf(stderr, "Error allocation json object\n");
+			exit(1);
+		}
+		jsonw_start_array(jw_global);
+	}
 	if (rtnl_dump_filter(&rth, print_fdb, stdout) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		exit(1);
 	}
-	delete_json_obj();
-	fflush(stdout);
+	if (jw_global) {
+		jsonw_end_array(jw_global);
+		jsonw_destroy(&jw_global);
+	}
 
 	return 0;
 }
@@ -384,7 +428,6 @@ static int fdb_modify(int cmd, int flags, int argc, char **argv)
 	inet_prefix dst;
 	unsigned long port = 0;
 	unsigned long vni = ~0;
-	unsigned long src_vni = ~0;
 	unsigned int via = 0;
 	char *endptr;
 	short vid = -1;
@@ -418,17 +461,11 @@ static int fdb_modify(int cmd, int flags, int argc, char **argv)
 			if ((endptr && *endptr) ||
 			    (vni >> 24) || vni == ULONG_MAX)
 				invarg("invalid VNI\n", *argv);
-		} else if (strcmp(*argv, "src_vni") == 0) {
-			NEXT_ARG();
-			src_vni = strtoul(*argv, &endptr, 0);
-			if ((endptr && *endptr) ||
-			    (src_vni >> 24) || src_vni == ULONG_MAX)
-				invarg("invalid src VNI\n", *argv);
 		} else if (strcmp(*argv, "via") == 0) {
 			NEXT_ARG();
 			via = ll_name_to_index(*argv);
-			if (!via)
-				exit(nodev(*argv));
+			if (via == 0)
+				invarg("invalid device\n", *argv);
 		} else if (strcmp(*argv, "self") == 0) {
 			req.ndm.ndm_flags |= NTF_SELF;
 		} else if (matches(*argv, "master") == 0) {
@@ -451,10 +488,6 @@ static int fdb_modify(int cmd, int flags, int argc, char **argv)
 			vid = atoi(*argv);
 		} else if (matches(*argv, "use") == 0) {
 			req.ndm.ndm_flags |= NTF_USE;
-		} else if (matches(*argv, "extern_learn") == 0) {
-			req.ndm.ndm_flags |= NTF_EXT_LEARNED;
-		} else if (matches(*argv, "sticky") == 0) {
-			req.ndm.ndm_flags |= NTF_STICKY;
 		} else {
 			if (strcmp(*argv, "to") == 0)
 				NEXT_ARG();
@@ -503,14 +536,14 @@ static int fdb_modify(int cmd, int flags, int argc, char **argv)
 	}
 	if (vni != ~0)
 		addattr32(&req.n, sizeof(req), NDA_VNI, vni);
-	if (src_vni != ~0)
-		addattr32(&req.n, sizeof(req), NDA_SRC_VNI, src_vni);
 	if (via)
 		addattr32(&req.n, sizeof(req), NDA_IFINDEX, via);
 
 	req.ndm.ndm_ifindex = ll_name_to_index(d);
-	if (!req.ndm.ndm_ifindex)
-		return nodev(d);
+	if (req.ndm.ndm_ifindex == 0) {
+		fprintf(stderr, "Cannot find device \"%s\"\n", d);
+		return -1;
+	}
 
 	if (rtnl_talk(&rth, &req.n, NULL) < 0)
 		return -1;

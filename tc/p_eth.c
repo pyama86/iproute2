@@ -68,6 +68,7 @@ done:
 }
 
 struct m_pedit_util p_pedit_eth = {
-	.id = "eth",
-	.parse_peopt = parse_eth,
+	NULL,
+	"eth",
+	parse_eth,
 };

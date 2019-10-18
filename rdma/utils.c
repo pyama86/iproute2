@@ -1,12 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
 /*
  * utils.c	RDMA tool
+ *
+ *              This program is free software; you can redistribute it and/or
+ *              modify it under the terms of the GNU General Public License
+ *              as published by the Free Software Foundation; either version
+ *              2 of the License, or (at your option) any later version.
+ *
  * Authors:     Leon Romanovsky <leonro@mellanox.com>
  */
 
 #include "rdma.h"
 #include <ctype.h>
-#include <inttypes.h>
 
 int rd_argc(struct rd *rd)
 {
@@ -56,7 +60,7 @@ bool rd_no_arg(struct rd *rd)
  * mlx5_1/1    | 1          | false
  * mlx5_1/-    | 0          | false
  *
- * In strict port mode, a non-0 port must be provided
+ * In strict mode, /- will return error.
  */
 static int get_port_from_argv(struct rd *rd, uint32_t *port,
 			      bool *is_dump_all, bool strict_port)
@@ -64,7 +68,7 @@ static int get_port_from_argv(struct rd *rd, uint32_t *port,
 	char *slash;
 
 	*port = 0;
-	*is_dump_all = strict_port ? false : true;
+	*is_dump_all = true;
 
 	slash = strchr(rd_argv(rd), '/');
 	/* if no port found, return 0 */
@@ -83,9 +87,6 @@ static int get_port_from_argv(struct rd *rd, uint32_t *port,
 		if (!*port && strlen(slash))
 			return -EINVAL;
 	}
-	if (strict_port && (*port == 0))
-		return -EINVAL;
-
 	return 0;
 }
 
@@ -124,7 +125,6 @@ static int add_filter(struct rd *rd, char *key, char *value,
 	struct filter_entry *fe;
 	bool key_found = false;
 	int idx = 0;
-	char *endp;
 	int ret;
 
 	fe = calloc(1, sizeof(*fe));
@@ -167,11 +167,6 @@ static int add_filter(struct rd *rd, char *key, char *value,
 		goto err_alloc;
 	}
 
-	errno = 0;
-	strtol(fe->value, &endp, 10);
-	if (valid_filters[idx].is_doit && !errno && *endp == '\0')
-		fe->is_doit = true;
-
 	for (idx = 0; idx < strlen(fe->value); idx++)
 		fe->value[idx] = tolower(fe->value[idx]);
 
@@ -184,20 +179,6 @@ err_alloc:
 err:
 	free(fe);
 	return ret;
-}
-
-bool rd_doit_index(struct rd *rd, uint32_t *idx)
-{
-	struct filter_entry *fe;
-
-	list_for_each_entry(fe, &rd->filter_list, list) {
-		if (fe->is_doit) {
-			*idx = atoi(fe->value);
-			return true;
-		}
-	}
-
-	return false;
 }
 
 int rd_build_filter(struct rd *rd, const struct filters valid_filters[])
@@ -236,7 +217,7 @@ out:
 	return ret;
 }
 
-static bool rd_check_is_key_exist(struct rd *rd, const char *key)
+bool rd_check_is_key_exist(struct rd *rd, const char *key)
 {
 	struct filter_entry *fe;
 
@@ -252,8 +233,8 @@ static bool rd_check_is_key_exist(struct rd *rd, const char *key)
  * Check if string entry is filtered:
  *  * key doesn't exist -> user didn't request -> not filtered
  */
-static bool rd_check_is_string_filtered(struct rd *rd, const char *key,
-					const char *val)
+bool rd_check_is_string_filtered(struct rd *rd,
+				 const char *key, const char *val)
 {
 	bool key_is_filtered = false;
 	struct filter_entry *fe;
@@ -303,7 +284,7 @@ out:
  * Check if key is filtered:
  * key doesn't exist -> user didn't request -> not filtered
  */
-static bool rd_check_is_filtered(struct rd *rd, const char *key, uint32_t val)
+bool rd_check_is_filtered(struct rd *rd, const char *key, uint32_t val)
 {
 	bool key_is_filtered = false;
 	struct filter_entry *fe;
@@ -352,24 +333,6 @@ out:
 	return key_is_filtered;
 }
 
-bool rd_is_filtered_attr(struct rd *rd, const char *key, uint32_t val,
-			 struct nlattr *attr)
-{
-	if (!attr)
-		return rd_check_is_key_exist(rd, key);
-
-	return rd_check_is_filtered(rd, key, val);
-}
-
-bool rd_is_string_filtered_attr(struct rd *rd, const char *key, const char *val,
-				struct nlattr *attr)
-{
-	if (!attr)
-		rd_check_is_key_exist(rd, key);
-
-	return rd_check_is_string_filtered(rd, key, val);
-}
-
 static void filters_cleanup(struct rd *rd)
 {
 	struct filter_entry *fe, *tmp;
@@ -412,70 +375,15 @@ static const enum mnl_attr_data_type nldev_policy[RDMA_NLDEV_ATTR_MAX] = {
 	[RDMA_NLDEV_ATTR_RES_STATE]		= MNL_TYPE_U8,
 	[RDMA_NLDEV_ATTR_RES_PID]		= MNL_TYPE_U32,
 	[RDMA_NLDEV_ATTR_RES_KERN_NAME]	= MNL_TYPE_NUL_STRING,
-	[RDMA_NLDEV_ATTR_RES_CM_ID]		= MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_CM_ID_ENTRY]	= MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_PS]		= MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_RES_SRC_ADDR]		= MNL_TYPE_UNSPEC,
-	[RDMA_NLDEV_ATTR_RES_DST_ADDR]		= MNL_TYPE_UNSPEC,
-	[RDMA_NLDEV_ATTR_RES_CQ] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_CQ_ENTRY] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_CQE] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_RES_USECNT] = MNL_TYPE_U64,
-	[RDMA_NLDEV_ATTR_RES_POLL_CTX] = MNL_TYPE_U8,
-	[RDMA_NLDEV_ATTR_RES_MR] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_MR_ENTRY] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_RES_RKEY] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_RES_LKEY] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_RES_IOVA] = MNL_TYPE_U64,
-	[RDMA_NLDEV_ATTR_RES_MRLEN] = MNL_TYPE_U64,
-	[RDMA_NLDEV_ATTR_NDEV_INDEX]		= MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_NDEV_NAME]		= MNL_TYPE_NUL_STRING,
-	[RDMA_NLDEV_ATTR_DRIVER] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_DRIVER_ENTRY] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_DRIVER_STRING] = MNL_TYPE_NUL_STRING,
-	[RDMA_NLDEV_ATTR_DRIVER_PRINT_TYPE] = MNL_TYPE_U8,
-	[RDMA_NLDEV_ATTR_DRIVER_S32] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_DRIVER_U32] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_DRIVER_S64] = MNL_TYPE_U64,
-	[RDMA_NLDEV_ATTR_DRIVER_U64] = MNL_TYPE_U64,
-	[RDMA_NLDEV_SYS_ATTR_NETNS_MODE] = MNL_TYPE_U8,
-	[RDMA_NLDEV_ATTR_STAT_COUNTER] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_STAT_COUNTER_ENTRY] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_STAT_COUNTER_ID] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_STAT_HWCOUNTERS] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_STAT_HWCOUNTER_ENTRY] = MNL_TYPE_NESTED,
-	[RDMA_NLDEV_ATTR_STAT_HWCOUNTER_ENTRY_NAME] = MNL_TYPE_NUL_STRING,
-	[RDMA_NLDEV_ATTR_STAT_HWCOUNTER_ENTRY_VALUE] = MNL_TYPE_U64,
-	[RDMA_NLDEV_ATTR_STAT_MODE] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_STAT_RES] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_STAT_AUTO_MODE_MASK] = MNL_TYPE_U32,
-	[RDMA_NLDEV_ATTR_DEV_DIM] = MNL_TYPE_U8,
 };
-
-int rd_attr_check(const struct nlattr *attr, int *typep)
-{
-	int type;
-
-	if (mnl_attr_type_valid(attr, RDMA_NLDEV_ATTR_MAX) < 0)
-		return MNL_CB_ERROR;
-
-	type = mnl_attr_get_type(attr);
-
-	if (mnl_attr_validate(attr, nldev_policy[type]) < 0)
-		return MNL_CB_ERROR;
-
-	*typep = nldev_policy[type];
-	return MNL_CB_OK;
-}
 
 int rd_attr_cb(const struct nlattr *attr, void *data)
 {
 	const struct nlattr **tb = data;
 	int type;
 
-	if (mnl_attr_type_valid(attr, RDMA_NLDEV_ATTR_MAX - 1) < 0)
-		/* We received unknown attribute */
-		return MNL_CB_OK;
+	if (mnl_attr_type_valid(attr, RDMA_NLDEV_ATTR_MAX) < 0)
+		return MNL_CB_ERROR;
 
 	type = mnl_attr_get_type(attr);
 
@@ -625,16 +533,6 @@ out:
 	return ret;
 }
 
-int rd_exec_require_dev(struct rd *rd, int (*cb)(struct rd *rd))
-{
-	if (rd_no_arg(rd)) {
-		pr_err("Please provide device name.\n");
-		return -EINVAL;
-	}
-
-	return rd_exec_dev(rd, cb);
-}
-
 int rd_exec_cmd(struct rd *rd, const struct rd_cmd *cmds, const char *str)
 {
 	const struct rd_cmd *c;
@@ -708,25 +606,7 @@ int rd_recv_msg(struct rd *rd, mnl_cb_t callback, void *data, unsigned int seq)
 		ret = mnl_cb_run(buf, ret, seq, portid, callback, data);
 	} while (ret > 0);
 
-	if (ret < 0 && !rd->suppress_errors)
-		perror("error");
-
 	mnl_socket_close(rd->nl);
-	return ret;
-}
-
-static int null_cb(const struct nlmsghdr *nlh, void *data)
-{
-	return MNL_CB_OK;
-}
-
-int rd_sendrecv_msg(struct rd *rd, unsigned int seq)
-{
-	int ret;
-
-	ret = rd_send_msg(rd);
-	if (!ret)
-		ret = rd_recv_msg(rd, null_cb, rd, seq);
 	return ret;
 }
 
@@ -760,190 +640,4 @@ struct dev_map *dev_map_lookup(struct rd *rd, bool allow_port_index)
 	dev_map = _dev_map_lookup(rd, dev_name);
 	free(dev_name);
 	return dev_map;
-}
-
-#define nla_type(attr) ((attr)->nla_type & NLA_TYPE_MASK)
-
-void newline(struct rd *rd)
-{
-	if (rd->json_output)
-		jsonw_end_array(rd->jw);
-	else
-		pr_out("\n");
-}
-
-void newline_indent(struct rd *rd)
-{
-	newline(rd);
-	if (!rd->json_output)
-		pr_out("    ");
-}
-
-static int print_driver_string(struct rd *rd, const char *key_str,
-				 const char *val_str)
-{
-	if (rd->json_output) {
-		jsonw_string_field(rd->jw, key_str, val_str);
-		return 0;
-	} else {
-		return pr_out("%s %s ", key_str, val_str);
-	}
-}
-
-void print_on_off(struct rd *rd, const char *key_str, bool on)
-{
-	print_driver_string(rd, key_str, (on) ? "on":"off");
-}
-
-static int print_driver_s32(struct rd *rd, const char *key_str, int32_t val,
-			      enum rdma_nldev_print_type print_type)
-{
-	if (rd->json_output) {
-		jsonw_int_field(rd->jw, key_str, val);
-		return 0;
-	}
-	switch (print_type) {
-	case RDMA_NLDEV_PRINT_TYPE_UNSPEC:
-		return pr_out("%s %d ", key_str, val);
-	case RDMA_NLDEV_PRINT_TYPE_HEX:
-		return pr_out("%s 0x%x ", key_str, val);
-	default:
-		return -EINVAL;
-	}
-}
-
-static int print_driver_u32(struct rd *rd, const char *key_str, uint32_t val,
-			      enum rdma_nldev_print_type print_type)
-{
-	if (rd->json_output) {
-		jsonw_int_field(rd->jw, key_str, val);
-		return 0;
-	}
-	switch (print_type) {
-	case RDMA_NLDEV_PRINT_TYPE_UNSPEC:
-		return pr_out("%s %u ", key_str, val);
-	case RDMA_NLDEV_PRINT_TYPE_HEX:
-		return pr_out("%s 0x%x ", key_str, val);
-	default:
-		return -EINVAL;
-	}
-}
-
-static int print_driver_s64(struct rd *rd, const char *key_str, int64_t val,
-			      enum rdma_nldev_print_type print_type)
-{
-	if (rd->json_output) {
-		jsonw_int_field(rd->jw, key_str, val);
-		return 0;
-	}
-	switch (print_type) {
-	case RDMA_NLDEV_PRINT_TYPE_UNSPEC:
-		return pr_out("%s %" PRId64 " ", key_str, val);
-	case RDMA_NLDEV_PRINT_TYPE_HEX:
-		return pr_out("%s 0x%" PRIx64 " ", key_str, val);
-	default:
-		return -EINVAL;
-	}
-}
-
-static int print_driver_u64(struct rd *rd, const char *key_str, uint64_t val,
-			      enum rdma_nldev_print_type print_type)
-{
-	if (rd->json_output) {
-		jsonw_int_field(rd->jw, key_str, val);
-		return 0;
-	}
-	switch (print_type) {
-	case RDMA_NLDEV_PRINT_TYPE_UNSPEC:
-		return pr_out("%s %" PRIu64 " ", key_str, val);
-	case RDMA_NLDEV_PRINT_TYPE_HEX:
-		return pr_out("%s 0x%" PRIx64 " ", key_str, val);
-	default:
-		return -EINVAL;
-	}
-}
-
-static int print_driver_entry(struct rd *rd, struct nlattr *key_attr,
-				struct nlattr *val_attr,
-				enum rdma_nldev_print_type print_type)
-{
-	int attr_type = nla_type(val_attr);
-	int ret = -EINVAL;
-	char *key_str;
-
-	if (asprintf(&key_str, "drv_%s", mnl_attr_get_str(key_attr)) == -1)
-		return -ENOMEM;
-
-	switch (attr_type) {
-	case RDMA_NLDEV_ATTR_DRIVER_STRING:
-		ret = print_driver_string(rd, key_str,
-					  mnl_attr_get_str(val_attr));
-		break;
-	case RDMA_NLDEV_ATTR_DRIVER_S32:
-		ret = print_driver_s32(rd, key_str, mnl_attr_get_u32(val_attr),
-				       print_type);
-		break;
-	case RDMA_NLDEV_ATTR_DRIVER_U32:
-		ret = print_driver_u32(rd, key_str, mnl_attr_get_u32(val_attr),
-				       print_type);
-		break;
-	case RDMA_NLDEV_ATTR_DRIVER_S64:
-		ret = print_driver_s64(rd, key_str, mnl_attr_get_u64(val_attr),
-				       print_type);
-		break;
-	case RDMA_NLDEV_ATTR_DRIVER_U64:
-		ret = print_driver_u64(rd, key_str, mnl_attr_get_u64(val_attr),
-				       print_type);
-		break;
-	}
-	free(key_str);
-	return ret;
-}
-
-void print_driver_table(struct rd *rd, struct nlattr *tb)
-{
-	int print_type = RDMA_NLDEV_PRINT_TYPE_UNSPEC;
-	struct nlattr *tb_entry, *key = NULL, *val;
-	int type, cc = 0;
-	int ret;
-
-	if (!rd->show_driver_details || !tb)
-		return;
-
-	if (rd->pretty_output)
-		newline_indent(rd);
-
-	/*
-	 * Driver attrs are tuples of {key, [print-type], value}.
-	 * The key must be a string.  If print-type is present, it
-	 * defines an alternate printf format type vs the native format
-	 * for the attribute.  And the value can be any available
-	 * driver type.
-	 */
-	mnl_attr_for_each_nested(tb_entry, tb) {
-
-		if (cc > MAX_LINE_LENGTH) {
-			if (rd->pretty_output)
-				newline_indent(rd);
-			cc = 0;
-		}
-		if (rd_attr_check(tb_entry, &type) != MNL_CB_OK)
-			return;
-		if (!key) {
-			if (type != MNL_TYPE_NUL_STRING)
-				return;
-			key = tb_entry;
-		} else if (type == MNL_TYPE_U8) {
-			print_type = mnl_attr_get_u8(tb_entry);
-		} else {
-			val = tb_entry;
-			ret = print_driver_entry(rd, key, val, print_type);
-			if (ret < 0)
-				return;
-			cc += ret;
-			print_type = RDMA_NLDEV_PRINT_TYPE_UNSPEC;
-			key = NULL;
-		}
-	}
-	return;
 }

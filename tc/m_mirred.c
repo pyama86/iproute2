@@ -194,16 +194,17 @@ parse_direction(struct action_util *a, int *argc_p, char ***argv_p,
 		ll_init_map(&rth);
 
 		idx = ll_name_to_index(d);
-		if (!idx)
-			return nodev(d);
+		if (idx == 0) {
+			fprintf(stderr, "Cannot find device \"%s\"\n", d);
+			return -1;
+		}
 
 		p.ifindex = idx;
 	}
 
 
 	if (p.eaction == TCA_EGRESS_MIRROR || p.eaction == TCA_INGRESS_MIRROR)
-		parse_action_control_dflt(&argc, &argv, &p.action, false,
-					  TC_ACT_PIPE);
+		parse_action_control(&argc, &argv, &p.action, false);
 
 	if (argc) {
 		if (iok && matches(*argv, "index") == 0) {
@@ -223,9 +224,10 @@ parse_direction(struct action_util *a, int *argc_p, char ***argv_p,
 		}
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_MIRRED_PARMS, &p, sizeof(p));
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -287,7 +289,7 @@ print_mirred(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_MIRRED_MAX, arg);
 
 	if (tb[TCA_MIRRED_PARMS] == NULL) {
-		fprintf(stderr, "Missing mirred parameters\n");
+		print_string(PRINT_FP, NULL, "%s", "[NULL mirred parameters]");
 		return -1;
 	}
 	p = RTA_DATA(tb[TCA_MIRRED_PARMS]);

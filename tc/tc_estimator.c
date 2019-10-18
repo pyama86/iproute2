@@ -20,7 +20,6 @@
 #include <arpa/inet.h>
 #include <string.h>
 
-#include "utils.h"
 #include "tc_core.h"
 
 int tc_setup_estimator(unsigned int A, unsigned int time_const, struct tc_estimator *est)

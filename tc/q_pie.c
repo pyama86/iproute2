@@ -30,10 +30,9 @@
 
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage: ... pie	[ limit PACKETS ][ target TIME us]\n"
-		"		[ tupdate TIME us][ alpha ALPHA ]"
-		"[beta BETA ][bytemode | nobytemode][ecn | noecn ]\n");
+	fprintf(stderr, "Usage: ... pie [ limit PACKETS ][ target TIME us]\n");
+	fprintf(stderr, "              [ tupdate TIME us][ alpha ALPHA ]");
+	fprintf(stderr, "[beta BETA ][bytemode | nobytemode][ecn | noecn ]\n");
 }
 
 #define ALPHA_MAX 32
@@ -104,7 +103,8 @@ static int pie_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 		argv++;
 	}
 
-	tail = addattr_nest(n, 1024, TCA_OPTIONS);
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, 1024, TCA_OPTIONS, NULL, 0);
 	if (limit)
 		addattr_l(n, 1024, TCA_PIE_LIMIT, &limit, sizeof(limit));
 	if (tupdate)
@@ -121,7 +121,7 @@ static int pie_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 		addattr_l(n, 1024, TCA_PIE_BYTEMODE, &bytemode,
 			  sizeof(bytemode));
 
-	addattr_nest_end(n, tail);
+	tail->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail;
 	return 0;
 }
 
@@ -199,7 +199,7 @@ static int pie_print_xstats(struct qdisc_util *qu, FILE *f,
 	st = RTA_DATA(xstats);
 	/*prob is returned as a fracion of maximum integer value */
 	fprintf(f, "prob %f delay %uus avg_dq_rate %u\n",
-		(double)st->prob / UINT64_MAX, st->delay,
+		(double)st->prob / (double)0xffffffff, st->delay,
 		st->avg_dq_rate);
 	fprintf(f, "pkts_in %u overlimit %u dropped %u maxq %u ecn_mark %u\n",
 		st->packets_in, st->overlimit, st->dropped, st->maxq,

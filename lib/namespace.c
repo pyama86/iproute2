@@ -26,8 +26,7 @@ static void bind_etc(const char *name)
 	if (strlen(name) >= NAME_MAX)
 		return;
 
-	snprintf(etc_netns_path, sizeof(etc_netns_path), "%s/%s", NETNS_ETC_DIR,
-		 name);
+	snprintf(etc_netns_path, sizeof(etc_netns_path), "%s/%s", NETNS_ETC_DIR, name);
 	dir = opendir(etc_netns_path);
 	if (!dir)
 		return;
@@ -37,8 +36,7 @@ static void bind_etc(const char *name)
 			continue;
 		if (strcmp(entry->d_name, "..") == 0)
 			continue;
-		snprintf(netns_name, sizeof(netns_name), "%s/%s",
-			 etc_netns_path, entry->d_name);
+		snprintf(netns_name, sizeof(netns_name), "%s/%s", etc_netns_path, entry->d_name);
 		snprintf(etc_name, sizeof(etc_name), "/etc/%s", entry->d_name);
 		if (mount(netns_name, etc_name, "none", MS_BIND, NULL) < 0) {
 			fprintf(stderr, "Bind %s -> %s failed: %s\n",
@@ -64,8 +62,7 @@ int netns_switch(char *name)
 	}
 
 	if (setns(netns, CLONE_NEWNET) < 0) {
-		fprintf(stderr,
-			"setting the network namespace \"%s\" failed: %s\n",
+		fprintf(stderr, "setting the network namespace \"%s\" failed: %s\n",
 			name, strerror(errno));
 		close(netns);
 		return -1;
@@ -83,8 +80,8 @@ int netns_get_fd(const char *name)
 	path = name;
 	ptr = strchr(name, '/');
 	if (!ptr) {
-		snprintf(pathbuf, sizeof(pathbuf), "%s/%s", NETNS_RUN_DIR,
-			 name);
+		snprintf(pathbuf, sizeof(pathbuf), "%s/%s",
+			NETNS_RUN_DIR, name );
 		path = pathbuf;
 	}
 	return open(path, O_RDONLY);

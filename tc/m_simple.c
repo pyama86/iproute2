@@ -80,9 +80,8 @@
 #endif
 static void explain(void)
 {
-	fprintf(stderr,
-		"Usage:... simple [sdata STRING] [index INDEX] [CONTROL]\n"
-		"\tSTRING being an arbitrary string\n"
+	fprintf(stderr, "Usage:... simple [sdata STRING] [index INDEX] [CONTROL]\n");
+	fprintf(stderr, "\tSTRING being an arbitrary string\n"
 		"\tINDEX := optional index value used\n"
 		"\tCONTROL := reclassify|pipe|drop|continue|ok\n");
 }
@@ -120,9 +119,6 @@ parse_simple(struct action_util *a, int *argc_p, char ***argv_p, int tca_id,
 		}
 	}
 
-	parse_action_control_dflt(&argc, &argv, &sel.action, false,
-				  TC_ACT_PIPE);
-
 	if (argc) {
 		if (matches(*argv, "index") == 0) {
 			NEXT_ARG();
@@ -148,11 +144,14 @@ parse_simple(struct action_util *a, int *argc_p, char ***argv_p, int tca_id,
 		return -1;
 	}
 
-	tail = addattr_nest(n, MAX_MSG, tca_id);
+	sel.action = TC_ACT_PIPE;
+
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, tca_id, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_DEF_PARMS, &sel, sizeof(sel));
 	if (simpdata)
 		addattr_l(n, MAX_MSG, TCA_DEF_DATA, simpdata, SIMP_MAX_DATA);
-	addattr_nest_end(n, tail);
+	tail->rta_len = (char *)NLMSG_TAIL(n) - (char *)tail;
 
 	*argc_p = argc;
 	*argv_p = argv;
@@ -171,13 +170,13 @@ static int print_simple(struct action_util *au, FILE *f, struct rtattr *arg)
 	parse_rtattr_nested(tb, TCA_DEF_MAX, arg);
 
 	if (tb[TCA_DEF_PARMS] == NULL) {
-		fprintf(stderr, "Missing simple parameters\n");
+		fprintf(f, "[NULL simple parameters]");
 		return -1;
 	}
 	sel = RTA_DATA(tb[TCA_DEF_PARMS]);
 
 	if (tb[TCA_DEF_DATA] == NULL) {
-		fprintf(stderr, "Missing simple string\n");
+		fprintf(f, "[missing simple string]");
 		return -1;
 	}
 
